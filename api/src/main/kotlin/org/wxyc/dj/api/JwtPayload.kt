@@ -72,44 +72,23 @@ object JwtDecoder {
 }
 
 /**
- * A hand-rolled parser for the flat `{"key": string|number|null}` shape a JWT
- * payload takes, so decoding a token doesn't require a JSON dependency this
- * module doesn't otherwise need. Not a general-purpose JSON parser — no
- * arrays, no nested objects, no booleans, because the claims this module
- * reads never carry them.
+ * A hand-rolled parser for the `{"key": value}` shape a JWT payload takes, so
+ * decoding a token doesn't require a JSON dependency this module doesn't
+ * otherwise need. This module only reads `sub`/`email`/`role`/`exp`, but a
+ * real Backend-Service token also carries structured claims this module does
+ * not — `capabilities: []`, `image: null`, and others — so every value shape
+ * (including nested arrays and objects) is parsed and *discarded* if unread,
+ * mirroring the tolerance `JSONDecoder` gives iOS's keyed-container decode of
+ * `JWTPayload.swift` for free. Only the claims this module actually reads are
+ * kept in the returned map.
  */
 private object JsonObjectParser {
     fun parse(json: String): Map<String, Any?> {
         val cursor = Cursor(json)
         cursor.skipWhitespace()
-        cursor.expect('{')
-        val fields = mutableMapOf<String, Any?>()
-        cursor.skipWhitespace()
-        if (cursor.peek() == '}') {
-            cursor.advance()
-            return fields
-        }
-        while (true) {
-            cursor.skipWhitespace()
-            val key = cursor.parseString()
-            cursor.skipWhitespace()
-            cursor.expect(':')
-            cursor.skipWhitespace()
-            fields[key] = cursor.parseValue()
-            cursor.skipWhitespace()
-            when (cursor.peek()) {
-                ',' -> {
-                    cursor.advance()
-                    continue
-                }
-                '}' -> {
-                    cursor.advance()
-                    break
-                }
-                else -> throw IllegalArgumentException("malformed JSON object")
-            }
-        }
-        return fields
+        val value = cursor.parseValue()
+        @Suppress("UNCHECKED_CAST")
+        return value as? Map<String, Any?> ?: throw IllegalArgumentException("payload was not a JSON object")
     }
 
     private class Cursor(private val json: String) {
@@ -135,10 +114,70 @@ private object JsonObjectParser {
 
         fun parseValue(): Any? = when {
             peek() == '"' -> parseString()
+            peek() == '{' -> parseObject()
+            peek() == '[' -> parseArray()
             json.startsWith("null", index) -> { index += 4; null }
             json.startsWith("true", index) -> { index += 4; true }
             json.startsWith("false", index) -> { index += 5; false }
             else -> parseNumber()
+        }
+
+        private fun parseObject(): Map<String, Any?> {
+            expect('{')
+            val fields = mutableMapOf<String, Any?>()
+            skipWhitespace()
+            if (peek() == '}') {
+                advance()
+                return fields
+            }
+            while (true) {
+                skipWhitespace()
+                val key = parseString()
+                skipWhitespace()
+                expect(':')
+                skipWhitespace()
+                fields[key] = parseValue()
+                skipWhitespace()
+                when (peek()) {
+                    ',' -> {
+                        advance()
+                        continue
+                    }
+                    '}' -> {
+                        advance()
+                        break
+                    }
+                    else -> throw IllegalArgumentException("malformed JSON object")
+                }
+            }
+            return fields
+        }
+
+        private fun parseArray(): List<Any?> {
+            expect('[')
+            val elements = mutableListOf<Any?>()
+            skipWhitespace()
+            if (peek() == ']') {
+                advance()
+                return elements
+            }
+            while (true) {
+                skipWhitespace()
+                elements.add(parseValue())
+                skipWhitespace()
+                when (peek()) {
+                    ',' -> {
+                        advance()
+                        continue
+                    }
+                    ']' -> {
+                        advance()
+                        break
+                    }
+                    else -> throw IllegalArgumentException("malformed JSON array")
+                }
+            }
+            return elements
         }
 
         fun parseString(): String {

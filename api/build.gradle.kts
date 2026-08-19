@@ -14,6 +14,7 @@
 // storage, connectivity) live in :app beside their `@Module`, and :api stays
 // SDK-free: no Sentry, no PostHog, no analytics of any kind.
 plugins {
+    `java-library`
     alias(libs.plugins.kotlin.jvm)
 }
 
@@ -30,7 +31,10 @@ tasks.withType<Test>().configureEach {
 }
 
 dependencies {
-    implementation(libs.okhttp)
+    // api, not implementation: CookielessHttpClient exposes OkHttpClient in
+    // its public API, so :app's Hilt @Module (issue #7) needs the type on
+    // its own compile classpath, not just at runtime.
+    api(libs.okhttp)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
