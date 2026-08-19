@@ -30,7 +30,11 @@ tasks.withType<Test>().configureEach {
 }
 
 dependencies {
+    implementation(libs.okhttp)
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
+    testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.kotlinx.coroutines.test)
     testRuntimeOnly(libs.junit.platform.launcher)
 }
