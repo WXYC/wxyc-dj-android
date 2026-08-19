@@ -11,11 +11,19 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
  * repo's `CLAUDE.md` before adding one.
  *
  * Base URLs are [HttpUrl], not `String`. OkHttp is already an `api`
- * dependency here (see [CookielessHttpClient]), and `HttpUrl` normalizes the
- * trailing-slash question at parse time instead of leaving it latent for
- * whichever later PR concatenates a request path onto [apiBaseUrl] — a plain
- * `String` would let `"$base/library/info"` and `"$base" + "/library/info"`
- * silently disagree depending on whether `base` happened to end in `/`.
+ * dependency here (see [CookielessHttpClient]), and the type steers a later
+ * PR's endpoint construction toward [HttpUrl.newBuilder] +
+ * `addPathSegments(...)` (or [HttpUrl.resolve]) instead of `String`
+ * interpolation — which [HttpUrl] does **not** make safe on its own.
+ * [apiBaseUrl]'s literal has no path segment, so it round-trips through
+ * `toString()` *with* a trailing slash (`"https://api.wxyc.org/"`);
+ * [authBaseUrl]'s literal already has one (`/auth`), so it round-trips
+ * *without* one. `"$apiBaseUrl/library/info"` would therefore double a
+ * slash while the parallel `"$authBaseUrl/sign-in/username"` would not —
+ * see `ConfigurationTest` for both round-trips pinned. Building the request
+ * path through the `HttpUrl` API rather than its `toString()` is what
+ * actually removes the hazard; holding an `HttpUrl` instead of a `String`
+ * only makes that the easy path to reach for.
  *
  * [localDevelopment] needs a debug-only cleartext-traffic allowance wired
  * into the manifest before it is reachable end-to-end: `targetSdk 36` blocks

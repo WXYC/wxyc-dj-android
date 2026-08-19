@@ -48,6 +48,16 @@ class PureJvmModuleTest {
      * resolve; the guard instead inspects this module's own *compiled test
      * classes* for a method actually carrying that annotation, which is the
      * real failure mode a stray JUnit 4 test produces.
+     *
+     * Two failure modes of the tripwire *itself* are guarded against, not
+     * just the JUnit 4 case it exists to catch: a class this scan can't load
+     * (e.g. a `NoClassDefFoundError`) fails loudly instead of being silently
+     * dropped from the scan, since the one class this guard can't load is
+     * exactly the one it can't then inspect for the annotation it's looking
+     * for; and the scan asserts it visited at least one class, so a
+     * packaging change that ever left `testClassesRoot` pointing at a jar
+     * (whose `walkTopDown()` over a single file yields nothing to filter on)
+     * can't read as a clean pass by scanning zero classes.
      */
     @Test
     fun `no compiled test class carries a JUnit 4 @Test annotation`() {
@@ -55,24 +65,53 @@ class PureJvmModuleTest {
             PureJvmModuleTest::class.java.protectionDomain.codeSource.location.toURI(),
         )
 
-        val offenders = testClassesRoot.walkTopDown()
+        val classFiles = testClassesRoot.walkTopDown()
             .filter { it.isFile && it.extension == "class" }
-            .map { file ->
-                file.relativeTo(testClassesRoot).path
-                    .removeSuffix(".class")
-                    .replace(File.separatorChar, '.')
-            }
-            .mapNotNull { className ->
-                runCatching { Class.forName(className, false, javaClass.classLoader) }.getOrNull()
-            }
-            .filter { candidate ->
-                candidate.declaredMethods.any { method ->
-                    method.annotations.any { it.annotationClass.qualifiedName == "org.junit.Test" }
-                }
-            }
-            .map { it.name }
             .toList()
 
+        assertTrue(
+            classFiles.isNotEmpty(),
+            "scanned zero .class files under $testClassesRoot — this tripwire must not " +
+                "read an empty scan as a clean pass (e.g. if test classes were ever " +
+                "packaged as a jar instead of a directory).",
+        )
+
+        val loadFailures = mutableListOf<String>()
+        val offenders = mutableListOf<String>()
+
+        for (file in classFiles) {
+            val className = file.relativeTo(testClassesRoot).path
+                .removeSuffix(".class")
+                .replace(File.separatorChar, '.')
+
+            val candidate = try {
+                Class.forName(className, false, javaClass.classLoader)
+            } catch (e: ClassNotFoundException) {
+                loadFailures += "$className (${e::class.simpleName}: ${e.message})"
+                continue
+            } catch (e: LinkageError) {
+                // Covers NoClassDefFoundError: the one class this scan can't
+                // load is exactly the one it can't then check for a stray
+                // @org.junit.Test, so silently skipping it (as an earlier
+                // version of this test did via runCatching { }.getOrNull())
+                // would let that class hide behind a load failure instead of
+                // a finding.
+                loadFailures += "$className (${e::class.simpleName}: ${e.message})"
+                continue
+            }
+
+            val hasJUnit4Test = candidate.declaredMethods.any { method ->
+                method.annotations.any { it.annotationClass.qualifiedName == "org.junit.Test" }
+            }
+            if (hasJUnit4Test) offenders += candidate.name
+        }
+
+        assertTrue(
+            loadFailures.isEmpty(),
+            "failed to load ${loadFailures.size} compiled test class(es) while scanning " +
+                "for a stray JUnit 4 @Test — this tripwire must not silently skip a class " +
+                "it cannot resolve: $loadFailures",
+        )
         assertTrue(
             offenders.isEmpty(),
             "JUnit 4 @org.junit.Test found on: $offenders — :api runs useJUnitPlatform() " +

@@ -35,7 +35,8 @@ private class StubStoringCookieJar : CookieJar {
  * Pins invariant 1 (the no-cookie policy) at the [CookielessHttpClient] /
  * [CookielessHttpClientFactory] boundary: that a client obtained through this
  * module never stores or replays a session cookie, and that the guarantee
- * survives derivation via [CookielessHttpClient.newBuilder].
+ * survives derivation via [CookielessHttpClient.derive] even when the
+ * derivation's own configuration closure tries to wire in a real cookie jar.
  */
 class CookielessHttpClientFactoryTest {
 
@@ -65,8 +66,8 @@ class CookielessHttpClientFactoryTest {
      * `.cookieJar(NO_COOKIES)` itself — deleting that line is a genuine no-op
      * on this platform, unlike iOS's `URLSession`, whose default really does
      * store cookies. That leaves the derivation path — [CookielessHttpClient
-     * .newBuilder] — as the one place this module's policy is actually at
-     * risk of being silently dropped, since a derived builder has no
+     * .derive] — as the one place this module's policy is actually at risk
+     * of being silently dropped, since a derived builder has no
      * language-level reason to keep it.
      *
      * Mirrors the iOS guard at
@@ -75,20 +76,43 @@ class CookielessHttpClientFactoryTest {
      * assertion is about suppression, not about a default. Here that means
      * starting from a client that would genuinely store and replay cookies —
      * built directly via the `internal` constructor test code has friend
-     * access to — and proving [CookielessHttpClient.newBuilder] undoes it.
+     * access to — and proving [CookielessHttpClient.derive] undoes it.
      * Deleting the `.cookieJar(CookieJar.NO_COOKIES)` call inside
-     * `newBuilder()` makes this test fail; restoring it makes it pass again.
+     * `derive()` makes this test fail; restoring it makes it pass again.
      */
     @Test
-    fun `newBuilder re-applies NO_COOKIES over a client that would otherwise store cookies`() {
+    fun `derive re-applies NO_COOKIES over a client that would otherwise store cookies`() {
         val cookieBearingClient = OkHttpClient.Builder()
             .cookieJar(StubStoringCookieJar())
             .build()
         val wrapper = CookielessHttpClient(cookieBearingClient)
 
-        val derived = wrapper.newBuilder().build()
+        val derived = wrapper.derive()
 
-        assertSame(CookieJar.NO_COOKIES, derived.cookieJar)
+        assertSame(CookieJar.NO_COOKIES, derived.okHttpClient.cookieJar)
+    }
+
+    /**
+     * The gap an earlier version of `derive()` (then `newBuilder(): OkHttpClient
+     * .Builder`) actually had: a caller with a legitimate reason to customize
+     * the derived client — adding an interceptor, say — writes ordinary OkHttp
+     * boilerplate and, deliberately or by copy-paste habit, ends up wiring in a
+     * real `CookieJar` inside that same builder chain. A bare `newBuilder()`
+     * return let that win, since the caller's `.cookieJar(...)` was the last
+     * call before `.build()`. [CookielessHttpClient.derive] closes it
+     * structurally: the configuration closure runs first, and
+     * `.cookieJar(NO_COOKIES)` is applied *after*, unconditionally — so this
+     * test's `configure` block setting a real, stateful jar must still lose.
+     */
+    @Test
+    fun `derive suppresses a cookie jar the configure closure tries to set`() {
+        val wrapper = CookielessHttpClientFactory.create(Configuration.production)
+
+        val derived = wrapper.derive {
+            cookieJar(StubStoringCookieJar())
+        }
+
+        assertSame(CookieJar.NO_COOKIES, derived.okHttpClient.cookieJar)
     }
 
     /**
