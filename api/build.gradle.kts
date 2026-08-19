@@ -44,10 +44,18 @@ dependencies {
     // a supertype of 'CookielessHttpClient'".
     api(libs.okhttp)
 
+    // api, not implementation: AuthService's public shape is a sealed
+    // interface over StateFlow (issue #3) — :app must resolve
+    // kotlinx.coroutines.flow.StateFlow to consume it at all, not just to
+    // build this module.
+    api(libs.kotlinx.coroutines.core)
+
     // implementation, not api: JwtDecoder's use of kotlinx.serialization is
     // an internal implementation detail — JwtPayload itself stays a plain
     // data class with no @Serializable on its public shape, so no consumer
-    // needs this on its own compile classpath.
+    // needs this on its own compile classpath. AuthService's wire DTOs
+    // (SignInRequest, JwtResponse, the better-auth error body) are private
+    // for the same reason.
     implementation(libs.kotlinx.serialization.json)
 
     testImplementation(platform(libs.junit.bom))
