@@ -1,6 +1,9 @@
 package org.wxyc.dj.api
 
+import okhttp3.Cookie
 import okhttp3.CookieJar
+import okhttp3.HttpUrl
+import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.mockwebserver.MockResponse
@@ -12,6 +15,28 @@ import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 
+/**
+ * A real, stateful [CookieJar] — stores whatever a response sets and replays
+ * it on the next request for the same URL. Used only to put a client into a
+ * genuinely cookie-bearing starting state; [okhttp3.CookieJar.NO_COOKIES] is
+ * a singleton with no observable state to bias.
+ */
+private class StubStoringCookieJar : CookieJar {
+    private val stored = mutableListOf<Cookie>()
+
+    override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+        stored += cookies
+    }
+
+    override fun loadForRequest(url: HttpUrl): List<Cookie> = stored.toList()
+}
+
+/**
+ * Pins invariant 1 (the no-cookie policy) at the [CookielessHttpClient] /
+ * [CookielessHttpClientFactory] boundary: that a client obtained through this
+ * module never stores or replays a session cookie, and that the guarantee
+ * survives derivation via [CookielessHttpClient.newBuilder].
+ */
 class CookielessHttpClientFactoryTest {
 
     private lateinit var server: MockWebServer
@@ -32,6 +57,38 @@ class CookielessHttpClientFactoryTest {
         val client = CookielessHttpClientFactory.create(Configuration.production).okHttpClient
 
         assertSame(CookieJar.NO_COOKIES, client.cookieJar)
+    }
+
+    /**
+     * OkHttp's own `Builder()` already defaults to `CookieJar.NO_COOKIES`, so
+     * the assertion above passes whether or not `create()` ever calls
+     * `.cookieJar(NO_COOKIES)` itself — deleting that line is a genuine no-op
+     * on this platform, unlike iOS's `URLSession`, whose default really does
+     * store cookies. That leaves the derivation path — [CookielessHttpClient
+     * .newBuilder] — as the one place this module's policy is actually at
+     * risk of being silently dropped, since a derived builder has no
+     * language-level reason to keep it.
+     *
+     * Mirrors the iOS guard at
+     * `Packages/WXYCAPI/Tests/WXYCAPITests/CookielessSessionTests.swift:30`,
+     * which sets `httpShouldHandleCookies = true` before wrapping so the
+     * assertion is about suppression, not about a default. Here that means
+     * starting from a client that would genuinely store and replay cookies —
+     * built directly via the `internal` constructor test code has friend
+     * access to — and proving [CookielessHttpClient.newBuilder] undoes it.
+     * Deleting the `.cookieJar(CookieJar.NO_COOKIES)` call inside
+     * `newBuilder()` makes this test fail; restoring it makes it pass again.
+     */
+    @Test
+    fun `newBuilder re-applies NO_COOKIES over a client that would otherwise store cookies`() {
+        val cookieBearingClient = OkHttpClient.Builder()
+            .cookieJar(StubStoringCookieJar())
+            .build()
+        val wrapper = CookielessHttpClient(cookieBearingClient)
+
+        val derived = wrapper.newBuilder().build()
+
+        assertSame(CookieJar.NO_COOKIES, derived.cookieJar)
     }
 
     /**
@@ -58,8 +115,8 @@ class CookielessHttpClientFactoryTest {
         )
 
         val configuration = Configuration(
-            authBaseUrl = server.url("/auth").toString(),
-            apiBaseUrl = server.url("/").toString(),
+            authBaseUrl = server.url("/auth"),
+            apiBaseUrl = server.url("/"),
         )
         val client = CookielessHttpClientFactory.create(configuration).okHttpClient
         val signInUrl = server.url("/auth/sign-in/username")

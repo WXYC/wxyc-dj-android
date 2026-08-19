@@ -16,6 +16,7 @@
 plugins {
     `java-library`
     alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 kotlin {
@@ -36,8 +37,27 @@ dependencies {
     // its own compile classpath, not just at runtime.
     api(libs.okhttp)
 
+    // implementation, not api: JwtDecoder's use of kotlinx.serialization is
+    // an internal implementation detail — JwtPayload itself stays a plain
+    // data class with no @Serializable on its public shape, so no consumer
+    // needs this on its own compile classpath.
+    implementation(libs.kotlinx.serialization.json)
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
+    // MockWebServer 4.x's own class directly `extends
+    // org.junit.rules.ExternalResource` (verified via javap against the
+    // resolved jar), so junit:junit cannot be excluded here — Kotlin's
+    // compiler requires every supertype in a referenced class's hierarchy to
+    // be resolvable, and the JVM verifier requires the same at class-load
+    // time. `exclude(group = "junit", module = "junit")` was tried and
+    // confirmed to break `:api:compileTestKotlin` outright wherever
+    // MockWebServer is referenced. Because junit:junit therefore always
+    // stays on this classpath, `org.junit.Test` will always resolve here —
+    // PureJvmModuleTest's tripwire scans compiled test *classes* for a
+    // JUnit 4 `@Test` annotation instead of asserting the class is absent
+    // from the classpath, since that would be a permanently-failing
+    // assertion under this constraint.
     testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.kotlinx.coroutines.test)
     testRuntimeOnly(libs.junit.platform.launcher)

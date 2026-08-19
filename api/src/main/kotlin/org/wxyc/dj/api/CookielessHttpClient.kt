@@ -1,5 +1,6 @@
 package org.wxyc.dj.api
 
+import okhttp3.Call
 import okhttp3.CookieJar
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -29,25 +30,45 @@ import java.util.concurrent.TimeUnit
  * a 401 demotion, a restore-time 401, a sign-in rollback, or a sign-out
  * whose call fails all leave the cookie behind, and the next sign-in 403s.
  *
- * The constructor is `internal` and there is no exposed builder, so no
- * consumer of this module can obtain an instance whose `CookieJar` was ever
- * set to anything else. That structural point is the whole reason the iOS
- * package reworked its own version of this in issue #99 — the policy had
- * been a flag two transport functions each set, and a third consumer was
- * added over a raw session with cookie handling at its default and nothing
- * caught it. Enforcing it here by construction, rather than by convention,
- * closes that gap regardless of which platform's default turns out to be
- * the safer one.
+ * The constructor is `internal` **and** the wrapped [okHttpClient] property is
+ * `internal`, so no consumer outside this module can reach a raw
+ * `OkHttpClient` at all — not by constructing one, and not by reading it off
+ * an instance the factory handed out. A public `val` here would have left
+ * exactly the gap the constructor alone closes: `create(cfg).okHttpClient
+ * .newBuilder().cookieJar(...)` compiles fine and defeats the policy from
+ * outside `:api`. That structural point is the whole reason the iOS package
+ * reworked its own version of this in issue #99 — the policy had been a flag
+ * two transport functions each set, and a third consumer was added over a raw
+ * session with cookie handling at its default and nothing caught it.
+ * Enforcing it here by construction, rather than by convention, closes that
+ * gap regardless of which platform's default turns out to be the safer one.
  *
- * **Scope: requests issued through [okHttpClient].** This is not an app-wide
- * guarantee. Coil builds its own `OkHttpClient` unless handed one, so once
- * cover art is fetched, `:app`'s `ImageLoader` must be constructed over
- * [okHttpClient] (or given `CookieJar.NO_COOKIES` directly) — the same hole
- * the iOS source notes for `AsyncImage` on `URLSession.shared`. Latent today,
- * since cover URLs are third-party CDN hosts; fatal the day art is proxied
- * through `api.wxyc.org`.
+ * `:app` gets exactly two ways to use this client: as an [okhttp3.Call.Factory]
+ * (Coil 3 accepts one directly, so its `ImageLoader` can be handed this
+ * wrapper without ever touching an `OkHttpClient`), and via [newBuilder] for
+ * anything that needs to derive a customized client — [newBuilder] re-applies
+ * [CookieJar.NO_COOKIES] itself, so a derived client can't silently drop the
+ * policy the way a bare `newBuilder()` on a raw client could.
+ *
+ * **Scope: requests issued through this client.** This is not an app-wide
+ * guarantee — the same hole the iOS source notes for `AsyncImage` on
+ * `URLSession.shared`. Latent today, since cover URLs are third-party CDN
+ * hosts; fatal the day art is proxied through `api.wxyc.org`.
  */
-class CookielessHttpClient internal constructor(val okHttpClient: OkHttpClient)
+class CookielessHttpClient internal constructor(
+    internal val okHttpClient: OkHttpClient,
+) : Call.Factory by okHttpClient {
+
+    /**
+     * Derives a new client builder from this one, re-applying
+     * [CookieJar.NO_COOKIES] so the policy survives the derivation. This is
+     * the only sanctioned route to an [OkHttpClient.Builder] from outside the
+     * module — there is no way to reach the underlying raw client to build
+     * from it directly.
+     */
+    fun newBuilder(): OkHttpClient.Builder =
+        okHttpClient.newBuilder().cookieJar(CookieJar.NO_COOKIES)
+}
 
 /**
  * The only way to obtain a [CookielessHttpClient]. `:api` exposes this plain
@@ -58,9 +79,22 @@ class CookielessHttpClient internal constructor(val okHttpClient: OkHttpClient)
  */
 object CookielessHttpClientFactory {
     fun create(configuration: Configuration): CookielessHttpClient {
+        // iOS's Configuration.timeout is URLRequest(timeoutInterval:), an
+        // idle/stall timeout: it resets on every byte received. OkHttp's
+        // callTimeout is the opposite shape — a hard cap on the whole call,
+        // including body transfer — so setting only callTimeout left the
+        // configured value operative in neither sense (connect/read/write sat
+        // at OkHttp's 10s defaults instead). Setting read/connect/write here
+        // is what actually mirrors the idle-timeout semantics, and matters
+        // concretely for phase 2's gzipped-NDJSON catalog export, which a
+        // hard whole-call cap would kill on a slow connection while bytes are
+        // still arriving.
+        val timeout = configuration.timeoutSeconds
         val client = OkHttpClient.Builder()
             .cookieJar(CookieJar.NO_COOKIES)
-            .callTimeout(configuration.timeoutSeconds, TimeUnit.SECONDS)
+            .connectTimeout(timeout, TimeUnit.SECONDS)
+            .readTimeout(timeout, TimeUnit.SECONDS)
+            .writeTimeout(timeout, TimeUnit.SECONDS)
             .build()
         return CookielessHttpClient(client)
     }
