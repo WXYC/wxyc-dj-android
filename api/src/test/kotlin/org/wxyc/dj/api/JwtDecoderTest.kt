@@ -68,7 +68,11 @@ class JwtDecoderTest {
     fun `rejects a token with an undecodable payload`() {
         val bad = "eyJhbGciOiJIUzI1NiJ9.@@@@.sig"
 
-        assertThrows(JwtDecodeError::class.java) {
+        // The specific arm, not the sealed parent: asserting the parent leaves
+        // Base64DecodeFailed the one branch of the three-way contract no test
+        // names, so a refactor that folded it into PayloadDecodeFailed would
+        // pass. AuthService keys on these arms differently.
+        assertThrows(JwtDecodeError.Base64DecodeFailed::class.java) {
             JwtDecoder.decode(bad)
         }
     }

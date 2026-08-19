@@ -74,9 +74,16 @@ class CookielessHttpClient internal constructor(
      * is then re-applied unconditionally, after [configure] returns and
      * before the client is built, so nothing [configure] does — including
      * wiring in a real [CookieJar] — can leave the derived client
-     * cookie-bearing. There is no way to reach a raw, unwrapped client from
-     * this method: it returns [CookielessHttpClient], never
-     * [OkHttpClient.Builder] or [OkHttpClient].
+     * cookie-bearing.
+     *
+     * What that does and does not guarantee: nothing this method *returns*
+     * can be cookie-bearing, and a client vended by this module can never be
+     * re-derived into one. It is not a sandbox — [configure]'s receiver is a
+     * live builder, so a caller can `build()` a raw [OkHttpClient] inside the
+     * closure. That grants no capability it lacked anyway, since OkHttp is an
+     * `api` dependency and `OkHttpClient.Builder()` is always in reach; the
+     * point of the wrapper is that the *module's* client is never the one
+     * carrying a jar.
      */
     fun derive(configure: OkHttpClient.Builder.() -> Unit = {}): CookielessHttpClient {
         val builder = okHttpClient.newBuilder()
