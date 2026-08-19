@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# The job executes arbitrary code from the PR head — Gradle build scripts,
+# annotation processors, and third-party dependencies — so it must never see a
+# writable token. Read-only contents is all a test job needs.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # :api:test is named explicitly rather than relying on `check`, because
+      # this repo's whole structural bet is that the :api suites run on the host
+      # in milliseconds. If they ever stop running, that has to be a visible
+      # deletion from this file, not a silent consequence of a task-graph change.
+      - name: Run :api unit tests
+        run: ./gradlew :api:test
+
+      - name: Run :app unit tests
+        run: ./gradlew :app:testDebugUnitTest
+
+      - name: Run lint
+        run: ./gradlew :app:lintDebug
+
+      # Lint's textReport prints findings to this log, but the HTML/XML detail
+      # (and the JUnit XML with real stack traces on a test failure) exists only
+      # on the runner — upload it or lose it.
+      - name: Upload test and lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: |
+            api/build/reports/
+            api/build/test-results/
+            app/build/reports/
+            app/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 14

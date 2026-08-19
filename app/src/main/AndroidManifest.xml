@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+      allowBackup="false" and dataExtractionRules are load-bearing, not
+      boilerplate, and they are not redundant with each other: the first covers
+      cloud backup, the second covers device-to-device transfer, and the
+      encrypted token store must travel by neither. Keystore keys are
+      non-exportable, but a ciphertext blob leaving the device is still a
+      credential artifact. Together they are the analogue of iOS's
+      kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly. See
+      res/xml/data_extraction_rules.xml.
+
+      tools:ignore="DataExtractionRules" — lint asks for an android:fullBackupContent
+      alongside, since dataExtractionRules only applies from Android 12 and minSdk
+      is 26. That advice assumes backup is on. Here allowBackup="false" disables
+      backup outright on 26-30, so a fullBackupContent would be inert: the rules
+      file exists for 12+, where it is also the only way to opt out of
+      device-to-device transfer.
+    -->
+    <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.WXYCDJ"
+        tools:ignore="DataExtractionRules">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.WXYCDJ">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

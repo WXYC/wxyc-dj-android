@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!--
+      ObsoleteSdkInt fires on mipmap-anydpi-v26 because minSdk is already 26 and
+      the qualifier looks redundant. It is not: AAPT resolves adaptive icons out
+      of `anydpi-v26` specifically, and a plain `anydpi` folder fails resource
+      linking with `resource mipmap/ic_launcher not found`. Verified by trying
+      it, not assumed.
+
+      Suppressed here rather than with tools:ignore in the icon XML, because
+      lint reports this against the folder configuration rather than any element
+      in the file, so an element-level ignore has no effect.
+    -->
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+</lint>

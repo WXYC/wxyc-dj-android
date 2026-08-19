@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The `-v26` qualifier is required, not redundant: AAPT resolves adaptive icons
+  out of `anydpi-v26` specifically, and a plain `anydpi` folder fails resource
+  linking with `resource mipmap/ic_launcher not found` even at minSdk 26. Lint
+  advises merging the folder anyway; that finding is suppressed in app/lint.xml,
+  where the reasoning is recorded.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

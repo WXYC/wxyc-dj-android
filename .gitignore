@@ -1,0 +1,27 @@
+*.iml
+.gradle
+.idea
+.DS_Store
+# Unanchored, so it catches every module's build dir, not just the root's.
+build/
+captures/
+.externalNativeBuild
+.cxx
+local.properties
+.kotlin
+
+# Every change from the scaffold on is developed in a worktree, per the org git
+# workflow.
+.worktrees/
+
+# Signing material never enters the repo. See docs/signing.md — the upload key
+# is identified by SHA-256 fingerprint, held outside version control.
+keystore.properties
+*.jks
+*.keystore
+
+# There is deliberately no secrets.properties in this repo, and none should be
+# added. This app's base URLs are public hostnames and its only credential is
+# the DJ's own session. The line is here so an accidental one is caught rather
+# than committed.
+secrets.properties

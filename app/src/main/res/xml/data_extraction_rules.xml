@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Excludes everything this app writes from BOTH extraction channels.
+
+  android:allowBackup="false" covers cloud backup only. Device-to-device
+  transfer is a separate channel with its own opt-out, and the encrypted token
+  store must not travel by either: Keystore keys are non-exportable, but a
+  ciphertext blob leaving the device is still a credential artifact. Together
+  these are the analogue of iOS's
+  kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly.
+
+  Do not narrow these exclusions to name a specific file. A future store added
+  under a different name would silently fall outside the rule; excluding the
+  whole domain fails safe.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>
