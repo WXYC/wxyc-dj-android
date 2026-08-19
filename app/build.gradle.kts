@@ -83,6 +83,12 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = false
+        }
+    }
 }
 
 // Pin the JDK Gradle compiles and runs tests on, not just the bytecode level:
@@ -106,4 +112,10 @@ dependencies {
     debugImplementation(libs.compose.ui.tooling)
 
     testImplementation(libs.junit4)
+    // The one place the pure-JVM :api/:app split can produce false confidence
+    // (see BinSorting's KDoc): Android's java.text.Collator delegates to
+    // android.icu, and the desktop JVM's does not, so a green :api:test alone
+    // doesn't prove the bin sort order holds on device. Robolectric runs the
+    // real platform Collator on the JVM without an emulator.
+    testImplementation(libs.robolectric)
 }
