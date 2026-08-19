@@ -1,15 +1,20 @@
 package org.wxyc.dj.api
 
 /**
- * Named slots in [TokenStorage]. Two for now — the JWT (short-lived,
- * cacheable) evicted independently of the session token (long-lived, the
- * source of truth). Mirrors iOS's `TokenSlot`; its offline-grace slots
- * (issue #57 — last confirmed server contact, durable payload copy) are out
- * of scope until the sign-in state machine (issue #3) needs them.
+ * Named slots in [TokenStorage]. The JWT (short-lived, cacheable) is evicted
+ * independently of the session token (long-lived, the source of truth).
+ * [LAST_VALIDATED_AT] and [PAYLOAD] anchor the offline grace window (issue
+ * #57, [OfflineSessionPolicy]): the wall-clock of the last confirmed server
+ * contact and a durable copy of the last [JwtPayload], so a cold launch
+ * offline can restore the cached identity without a network round-trip.
+ * [PAYLOAD] lives in its own slot so a transient [AuthService.invalidateJwt]
+ * (which clears only [JWT]) never erases it. Mirrors iOS's `TokenSlot`.
  */
 enum class TokenSlot {
     SESSION_TOKEN,
     JWT,
+    LAST_VALIDATED_AT,
+    PAYLOAD,
 }
 
 /**
