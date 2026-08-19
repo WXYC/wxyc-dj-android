@@ -61,17 +61,29 @@ class PureJvmModuleTest {
      */
     @Test
     fun `no compiled test class carries a JUnit 4 @Test annotation`() {
-        val testClassesRoot = File(
-            PureJvmModuleTest::class.java.protectionDomain.codeSource.location.toURI(),
-        )
+        // Every directory on the test runtime classpath, not just this class's
+        // own output root. Deriving the root from `protectionDomain` alone
+        // resolves to build/classes/kotlin/test and silently misses
+        // build/classes/java/test — a Java test carrying JUnit 4's @Test would
+        // then compile, never run, and leave the build green, which is the
+        // exact failure this tripwire exists to catch, hiding one source set
+        // over.
+        val classpathRoots = System.getProperty("java.class.path")
+            .split(File.pathSeparator)
+            .map(::File)
+            .filter { it.isDirectory }
 
-        val classFiles = testClassesRoot.walkTopDown()
-            .filter { it.isFile && it.extension == "class" }
-            .toList()
+        // Each file is carried with the root it came from, since the root is
+        // what turns a path back into a fully-qualified class name.
+        val classFiles = classpathRoots.flatMap { root ->
+            root.walkTopDown()
+                .filter { it.isFile && it.extension == "class" }
+                .map { root to it }
+        }
 
         assertTrue(
             classFiles.isNotEmpty(),
-            "scanned zero .class files under $testClassesRoot — this tripwire must not " +
+            "scanned zero .class files under $classpathRoots — this tripwire must not " +
                 "read an empty scan as a clean pass (e.g. if test classes were ever " +
                 "packaged as a jar instead of a directory).",
         )
@@ -79,8 +91,8 @@ class PureJvmModuleTest {
         val loadFailures = mutableListOf<String>()
         val offenders = mutableListOf<String>()
 
-        for (file in classFiles) {
-            val className = file.relativeTo(testClassesRoot).path
+        for ((root, file) in classFiles) {
+            val className = file.relativeTo(root).path
                 .removeSuffix(".class")
                 .replace(File.separatorChar, '.')
 

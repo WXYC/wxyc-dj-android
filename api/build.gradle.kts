@@ -32,9 +32,16 @@ tasks.withType<Test>().configureEach {
 }
 
 dependencies {
-    // api, not implementation: CookielessHttpClient exposes OkHttpClient in
-    // its public API, so :app's Hilt @Module (issue #7) needs the type on
-    // its own compile classpath, not just at runtime.
+    // api, not implementation — but NOT because the client is exposed: the
+    // constructor and the wrapped OkHttpClient are both internal, and keeping
+    // them that way is what makes the cookie policy hold by construction. Do
+    // not "reconcile" this comment by re-publishing the client.
+    //
+    // Two things genuinely need OkHttp on :app's compile classpath:
+    // CookielessHttpClient's `okhttp3.Call.Factory` supertype, and
+    // OkHttpClient.Builder as derive()'s closure receiver. Downgrading to
+    // implementation breaks :app with "Cannot access 'Call.Factory' which is
+    // a supertype of 'CookielessHttpClient'".
     api(libs.okhttp)
 
     // implementation, not api: JwtDecoder's use of kotlinx.serialization is
