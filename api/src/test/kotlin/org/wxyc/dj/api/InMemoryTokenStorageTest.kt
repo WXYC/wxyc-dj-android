@@ -5,6 +5,15 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 
+/**
+ * Pins the in-memory [TokenStorage] implementation's contract: slots
+ * ([TokenSlot.SESSION_TOKEN] / [TokenSlot.JWT]) are independent, an unset
+ * slot reads as `null`, and — the invariant every terminal-cleanup path in
+ * `AuthService` (issue #53's rollback, #66's generation guard, sign-out)
+ * will come to depend on — [InMemoryTokenStorage.clearAll] leaves no slot
+ * behind, checked by iterating [TokenSlot.entries] rather than naming each
+ * slot so a newly-added slot can't silently survive it.
+ */
 class InMemoryTokenStorageTest {
 
     @Test

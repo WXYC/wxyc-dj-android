@@ -7,6 +7,14 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
+/**
+ * Pins [JwtDecoder]'s client-side-only contract: it reads `sub`/`email`/
+ * `role`/`exp` off a JWT's payload segment without verifying the signature,
+ * tolerates unread structured claims of any shape (a real Backend-Service
+ * token carries several this module doesn't read), and maps every failure
+ * mode — wrong segment count, undecodable base64url, undecodable JSON — to a
+ * typed [JwtDecodeError] rather than letting a raw parse exception escape.
+ */
 class JwtDecoderTest {
 
     @Test
