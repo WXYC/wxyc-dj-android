@@ -4,7 +4,6 @@ import java.time.Instant
 import java.util.Base64
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
-import kotlinx.serialization.json.Json
 
 /**
  * The claims Backend-Service puts in a JWT that this module reads: subject,
@@ -83,7 +82,7 @@ private data class RawJwtPayload(
  * PR that first uses them" rule.
  */
 object JwtDecoder {
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = WxycJson.json
 
     fun decode(token: String): JwtPayload {
         val segments = token.split(".")
