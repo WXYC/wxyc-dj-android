@@ -83,6 +83,20 @@ class JwtDecoderTest {
         }
     }
 
+    // No test attempts to reproduce a StackOverflowError via a deeply nested
+    // unread claim here — verified, not assumed: probed up to 5,000,000
+    // levels of both object and array nesting under ignoreUnknownKeys (and
+    // as a fully materialized JsonElement tree), and none overflowed the
+    // stack. kotlinx.serialization's skip/parse path appears to walk nested
+    // structures iteratively rather than via JVM call-stack recursion, so
+    // the StackOverflowError decode()'s catch clause guards against is not
+    // reproducible against the current dependency version. The catch stays
+    // as defense-in-depth against a future kotlinx.serialization version, a
+    // different runtime's stack behavior, or a differently-shaped payload —
+    // see JwtPayload.kt's decode() for the reasoning — but a test asserting
+    // it fires would have to fabricate the failure rather than trigger it,
+    // which is worse than no test at all.
+
     private fun jwtFixture(expiresIn: Long, extraClaimsJson: String = ""): String {
         val header = """{"alg":"HS256","typ":"JWT"}"""
         val exp = Instant.now().epochSecond + expiresIn

@@ -45,10 +45,18 @@ import java.util.concurrent.TimeUnit
  *
  * `:app` gets exactly two ways to use this client: as an [okhttp3.Call.Factory]
  * (Coil 3 accepts one directly, so its `ImageLoader` can be handed this
- * wrapper without ever touching an `OkHttpClient`), and via [newBuilder] for
- * anything that needs to derive a customized client — [newBuilder] re-applies
- * [CookieJar.NO_COOKIES] itself, so a derived client can't silently drop the
- * policy the way a bare `newBuilder()` on a raw client could.
+ * wrapper without ever touching an `OkHttpClient`), and via [derive] for
+ * anything that needs a customized client. Note [derive] never hands back a
+ * bare [OkHttpClient.Builder] — an earlier version of this class did, as
+ * `newBuilder(): OkHttpClient.Builder`, which merely moved invariant 1's gap
+ * rather than closing it: `newBuilder().cookieJar(realJar).build()` compiles
+ * fine and returns a plain, uncontrolled `OkHttpClient` with cookies armed,
+ * itself a [okhttp3.Call.Factory] usable anywhere this wrapper is. [derive]
+ * instead takes a configuration closure and applies
+ * [CookieJar.NO_COOKIES] itself as the *last* builder call before `build()`
+ * — after the closure runs — so a jar set inside it, deliberately or not,
+ * can never win, and the only thing that ever leaves this method is another
+ * [CookielessHttpClient].
  *
  * **Scope: requests issued through this client.** This is not an app-wide
  * guarantee — the same hole the iOS source notes for `AsyncImage` on
@@ -60,14 +68,22 @@ class CookielessHttpClient internal constructor(
 ) : Call.Factory by okHttpClient {
 
     /**
-     * Derives a new client builder from this one, re-applying
-     * [CookieJar.NO_COOKIES] so the policy survives the derivation. This is
-     * the only sanctioned route to an [OkHttpClient.Builder] from outside the
-     * module — there is no way to reach the underlying raw client to build
-     * from it directly.
+     * Derives a new [CookielessHttpClient] from this one. [configure] runs
+     * first against a fresh [OkHttpClient.Builder] (add an interceptor,
+     * change a timeout, whatever the caller needs); [CookieJar.NO_COOKIES]
+     * is then re-applied unconditionally, after [configure] returns and
+     * before the client is built, so nothing [configure] does — including
+     * wiring in a real [CookieJar] — can leave the derived client
+     * cookie-bearing. There is no way to reach a raw, unwrapped client from
+     * this method: it returns [CookielessHttpClient], never
+     * [OkHttpClient.Builder] or [OkHttpClient].
      */
-    fun newBuilder(): OkHttpClient.Builder =
-        okHttpClient.newBuilder().cookieJar(CookieJar.NO_COOKIES)
+    fun derive(configure: OkHttpClient.Builder.() -> Unit = {}): CookielessHttpClient {
+        val builder = okHttpClient.newBuilder()
+        builder.configure()
+        val client = builder.cookieJar(CookieJar.NO_COOKIES).build()
+        return CookielessHttpClient(client)
+    }
 }
 
 /**

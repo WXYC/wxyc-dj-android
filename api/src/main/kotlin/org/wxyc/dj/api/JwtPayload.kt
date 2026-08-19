@@ -64,14 +64,23 @@ private data class RawJwtPayload(
  *
  * Payload decoding goes through kotlinx.serialization rather than a
  * hand-rolled parser: the earlier hand-rolled recursive-descent parser was
- * the confirmed source of a `StackOverflowError` on the cold-launch path — a
- * `StackOverflowError` is an `Error`, not an `Exception`, so it escaped the
- * decoder's own `catch (e: Exception)` and crashed the caller outright rather
- * than surfacing as a typed [JwtDecodeError]. Depending on kotlinx.serialization
- * here rather than avoiding the dependency is deliberate: the port plan
- * already commits `:api` to it for the DTOs that land next, so this is that
- * dependency arriving one PR earlier alongside its first real use, per the
- * repo's own "entries are added by the PR that first uses them" rule.
+ * the confirmed source of a `StackOverflowError` on the cold-launch path.
+ * `decode` still catches `StackOverflowError` explicitly below, as
+ * defense-in-depth — checked, not assumed: probing kotlinx.serialization's
+ * reader up to 5,000,000 levels of nested unread claims (both object and
+ * array nesting, under `ignoreUnknownKeys`, and as a fully materialized
+ * `JsonElement` tree) never overflowed the stack, so unlike the parser this
+ * replaces, its skip/parse path does not appear to recurse per nesting level
+ * on the JVM. The catch stays anyway: `StackOverflowError` is an `Error`, so
+ * an uncaught one would still crash the caller outright rather than surface
+ * as a typed [JwtDecodeError], and that guarantee is cheap to keep against a
+ * future kotlinx.serialization version or a differently-shaped payload,
+ * even with no reproducible case backing it today. Depending on
+ * kotlinx.serialization here rather than avoiding the dependency is
+ * deliberate regardless: the port plan already commits `:api` to it for the
+ * DTOs that land next, so this is that dependency arriving one PR earlier
+ * alongside its first real use, per the repo's own "entries are added by the
+ * PR that first uses them" rule.
  */
 object JwtDecoder {
     private val json = Json { ignoreUnknownKeys = true }
@@ -89,6 +98,14 @@ object JwtDecoder {
         } catch (e: SerializationException) {
             throw JwtDecodeError.PayloadDecodeFailed
         } catch (e: IllegalArgumentException) {
+            throw JwtDecodeError.PayloadDecodeFailed
+        } catch (e: StackOverflowError) {
+            // Defense-in-depth, not a reproduced failure against the current
+            // kotlinx.serialization version — see this object's KDoc.
+            // StackOverflowError is an Error, so it is not caught by either
+            // clause above; if some future payload shape or dependency
+            // version ever does overflow here, this is what keeps it a
+            // typed JwtDecodeError instead of a crash.
             throw JwtDecodeError.PayloadDecodeFailed
         }
 
