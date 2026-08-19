@@ -21,6 +21,34 @@ class JwtDecoderTest {
         assertTrue(payload.expiration.epochSecond - Instant.now().epochSecond > 3500)
     }
 
+    /**
+     * A real Backend-Service token carries structured claims this module
+     * doesn't read — `capabilities` is always present, even as `[]` — and
+     * iOS's `JSONDecoder` keyed-container decode of `JWTPayload.swift`
+     * silently ignores whatever shape they take. This hand-rolled decoder
+     * must do the same rather than treat an array or nested object as
+     * undecodable, or every real token fails to decode.
+     */
+    @Test
+    fun `tolerates unread structured claims of any shape`() {
+        val token = jwtFixture(
+            expiresIn = 3600,
+            extraClaimsJson = """
+                ,"capabilities":["bin:read","bin:write"],
+                "emailVerified":true,
+                "image":null,
+                "createdAt":1755500000,
+                "session":{"impersonatedBy":null,"nested":{"deep":[1,2,3]}}
+            """.trimIndent(),
+        )
+
+        val payload = JwtDecoder.decode(token)
+
+        assertEquals("42", payload.sub)
+        assertEquals("juana@wxyc.org", payload.email)
+        assertEquals("dj", payload.role)
+    }
+
     @Test
     fun `rejects a token with the wrong segment count`() {
         assertThrows(JwtDecodeError.Malformed::class.java) {
@@ -47,10 +75,11 @@ class JwtDecoderTest {
         }
     }
 
-    private fun jwtFixture(expiresIn: Long): String {
+    private fun jwtFixture(expiresIn: Long, extraClaimsJson: String = ""): String {
         val header = """{"alg":"HS256","typ":"JWT"}"""
         val exp = Instant.now().epochSecond + expiresIn
-        val payload = """{"sub":"42","email":"juana@wxyc.org","role":"dj","exp":$exp}"""
+        val payload =
+            """{"sub":"42","email":"juana@wxyc.org","role":"dj","exp":$exp$extraClaimsJson}"""
         val encoder = Base64.getUrlEncoder().withoutPadding()
         val encodedHeader = encoder.encodeToString(header.toByteArray())
         val encodedPayload = encoder.encodeToString(payload.toByteArray())
