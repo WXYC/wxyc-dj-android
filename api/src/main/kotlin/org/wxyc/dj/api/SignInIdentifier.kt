@@ -71,8 +71,13 @@ sealed class SignInIdentifier {
      * Returns the *fact* — "the DJ typed this address" — rather than display
      * copy; the wording for the `null` case belongs to whichever surface
      * renders it. Mirrors iOS's `SignInIdentifier.typedEmail`.
+     *
+     * Deliberately **internal**: it is what keeps the display-string
+     * discipline from being bypassable. [SignInIdentifier] itself stays
+     * public (already was, from the routing predicate), but nothing outside
+     * this module gets to read this fact directly.
      */
-    val typedEmail: String?
+    internal val typedEmail: String?
         get() = when (this) {
             is Email -> raw
             is Username -> null

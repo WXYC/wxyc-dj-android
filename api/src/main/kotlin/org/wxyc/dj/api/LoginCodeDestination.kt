@@ -22,17 +22,24 @@ package org.wxyc.dj.api
  * Kotlin visibility gets while still letting `:api`'s own tests construct
  * one directly.
  *
- * Deliberately **not** a `data class`: a `data class` with a non-public
- * primary constructor still synthesizes a `copy()` that historically
- * remains `public` regardless (KT-11914) — precisely the loophole that
- * would let an outside caller reconstruct a fabricated [typedEmail] through
- * `copy()` even with the constructor locked down. A plain class with a
- * hand-written [equals]/[hashCode] closes that hole instead of trusting
- * compiler behavior that has changed across Kotlin versions.
+ * `data class`, guarded by [ConsistentCopyVisibility]: an *un*guarded `data
+ * class` over a non-public primary constructor still synthesizes a `copy()`
+ * that historically remained `public` regardless (KT-11914) — precisely the
+ * loophole that would let an outside caller reconstruct a fabricated
+ * [typedEmail] through `copy()` even with the constructor locked down.
+ * [ConsistentCopyVisibility] closes exactly that hole — the generated
+ * `copy()` is mangled to match the constructor's own (`internal`)
+ * visibility, verified with `javap -p` — while still letting `equals`/
+ * `hashCode`/`toString`/`component1`/`component2` be synthesized instead of
+ * hand-written and liable to drift out of sync with the fields. **Do not
+ * remove this annotation as noise**: without it, the class still compiles
+ * (with a warning) but `copy()` reopens the leak this type exists to
+ * prevent.
  *
  * Mirrors iOS's `LoginCodeDestination`.
  */
-class LoginCodeDestination internal constructor(
+@ConsistentCopyVisibility
+data class LoginCodeDestination internal constructor(
     /** Keys the verify call. May be an address the DJ never typed. */
     val email: String,
     /**
@@ -41,11 +48,4 @@ class LoginCodeDestination internal constructor(
      * the `null` case belongs to whichever surface renders it.
      */
     val typedEmail: String?,
-) {
-    override fun equals(other: Any?): Boolean =
-        other is LoginCodeDestination && email == other.email && typedEmail == other.typedEmail
-
-    override fun hashCode(): Int = 31 * email.hashCode() + (typedEmail?.hashCode() ?: 0)
-
-    override fun toString(): String = "LoginCodeDestination(email=$email, typedEmail=$typedEmail)"
-}
+)

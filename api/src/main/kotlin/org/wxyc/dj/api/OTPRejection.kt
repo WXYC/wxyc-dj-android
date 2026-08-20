@@ -21,9 +21,13 @@ package org.wxyc.dj.api
  * no doubling guard. Ending here exactly where better-auth's own messages
  * end keeps that contract true rather than widening it for one caller.
  *
+ * Deliberately **internal**: iOS's own `OTPRejection` is declared internal
+ * to its package, and nothing outside this module needs to name a specific
+ * rejection code — callers see [AuthError.Rejected]'s rendered message.
+ *
  * Mirrors iOS's `OTPRejection`.
  */
-enum class OTPRejection(val code: String, val copy: String) {
+internal enum class OTPRejection(val code: String, val copy: String) {
     /**
      * `400` — the code doesn't match. Also what an unknown *account* gets,
      * since `disableSignUp: true` makes the server refuse to distinguish
