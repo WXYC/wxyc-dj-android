@@ -59,13 +59,16 @@ class ApiClientTest {
      * should consume that first request via `server.takeRequest()` before
      * enqueuing their own stubs.
      */
-    private suspend fun signedInClient(sessionToken: String = "session-abc"): Pair<ApiClient, InMemoryTokenStorage> {
+    private suspend fun signedInClient(
+        sessionToken: String = "session-abc",
+        initialJwt: String = WireFixtures.jwt(),
+    ): Pair<ApiClient, InMemoryTokenStorage> {
         val configuration = configuration()
         val storage = InMemoryTokenStorage()
         storage.save(sessionToken, TokenSlot.SESSION_TOKEN)
         val callFactory = CookielessHttpClientFactory.create(configuration)
         val auth = AuthService(configuration, storage, callFactory)
-        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"token":"${WireFixtures.jwt()}"}"""))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"token":"$initialJwt"}"""))
         auth.restoreSession()
         return ApiClient(configuration, callFactory, auth) to storage
     }
@@ -74,7 +77,8 @@ class ApiClientTest {
 
     @Test
     fun `searchLibrary composes the query and attaches the bearer`() = runTest {
-        val (client, _) = signedInClient()
+        val jwt = WireFixtures.jwt()
+        val (client, _) = signedInClient(initialJwt = jwt)
         server.takeRequest() // the restoreSession JWT exchange
 
         server.enqueue(MockResponse().setResponseCode(200).setBody("[${Fixtures.juanaMolinaSearchResult}]"))
@@ -89,7 +93,10 @@ class ApiClientTest {
         assertEquals("Juana", url.queryParameter("artist_name"))
         assertEquals("10", url.queryParameter("n"))
         assertNull(url.queryParameter("album_title"))
-        assertTrue(request.getHeader("Authorization")?.startsWith("Bearer ") == true)
+        // The exact token, not merely the "Bearer " prefix: AuthService holds a
+        // session token *and* a JWT, so attaching the wrong one is the natural
+        // confusion, and a prefix-only assertion cannot tell them apart.
+        assertEquals("Bearer $jwt", request.getHeader("Authorization"))
     }
 
     @Test
@@ -265,11 +272,16 @@ class ApiClientTest {
 
     @Test
     fun `a 401 invalidates the JWT and retries exactly once`() = runTest {
-        val (client, _) = signedInClient()
+        // Two distinguishable tokens, so the assertions below can tell which
+        // one each attempt carried. A differing `exp` is enough to make the
+        // encoded payloads differ.
+        val staleJwt = WireFixtures.jwt(expiresInSeconds = 600)
+        val refreshedJwt = WireFixtures.jwt(expiresInSeconds = 1800)
+        val (client, _) = signedInClient(initialJwt = staleJwt)
         server.takeRequest()
 
         server.enqueue(MockResponse().setResponseCode(401))
-        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"token":"${WireFixtures.jwt()}"}"""))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"token":"$refreshedJwt"}"""))
         server.enqueue(MockResponse().setResponseCode(200).setBody("[${Fixtures.juanaMolinaSearchResult}]"))
 
         val results = client.searchLibrary(artist = "Juana", title = null)
@@ -277,11 +289,16 @@ class ApiClientTest {
         assertEquals(1, results.size)
         val firstAttempt = server.takeRequest()
         assertEquals("/library/", firstAttempt.requestUrl!!.encodedPath)
+        assertEquals("Bearer $staleJwt", firstAttempt.getHeader("Authorization"))
         val refresh = server.takeRequest()
         assertEquals("/auth/token", refresh.requestUrl!!.encodedPath)
         val retry = server.takeRequest()
         assertEquals("/library/", retry.requestUrl!!.encodedPath)
-        assertTrue(retry.getHeader("Authorization")?.startsWith("Bearer ") == true)
+        // The *refreshed* token specifically, which also pins that
+        // invalidateJwt() took effect: a retry that re-sent the rejected
+        // bearer would 401 again rather than recover, and a prefix-only
+        // assertion could not tell the two apart.
+        assertEquals("Bearer $refreshedJwt", retry.getHeader("Authorization"))
     }
 
     /**
@@ -375,6 +392,56 @@ class ApiClientTest {
         runCurrent()
         val recorded = server.takeRequest(5, TimeUnit.SECONDS)
         assertNotNull(recorded, "expected the search request to reach the server before cancelling")
+
+        deferred.cancel()
+        val thrown = runCatching { deferred.await() }.exceptionOrNull()
+
+        assertTrue(thrown is CancellationException, "expected CancellationException, got $thrown")
+    }
+
+    /**
+     * The second cancellation carve-out, on the leg the test above cannot
+     * reach. [ApiClient] catches [CancellationException] in two places:
+     * around the request itself, and around the bearer resolve. The test
+     * above only exercises the first, because [signedInClient] warms the JWT
+     * cache via `restoreSession()`, so `currentJwt()` returns without ever
+     * suspending.
+     *
+     * This one drops the cached JWT first, so the bearer resolve has to
+     * re-mint it and suspends on a `/auth/token` exchange that is
+     * deliberately never answered — putting the cancellation inside
+     * `resolveBearer` rather than inside the request.
+     *
+     * Without the carve-out there, `resolveBearer`'s catch-all would convert
+     * the cancellation into a fabricated network error: the parent's
+     * cancellation would be swallowed (breaking structured concurrency), and
+     * once the phase-2 connectivity monitor lands, a keystroke arriving
+     * during the roughly-hourly lazy refresh would latch the app offline —
+     * exactly what the debounce carve-out exists to prevent.
+     */
+    @Test
+    @Timeout(value = 10, unit = TimeUnit.SECONDS)
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    fun `a cancellation during the lazy JWT refresh propagates instead of becoming a network error`() = runTest {
+        val configuration = configuration()
+        val storage = InMemoryTokenStorage()
+        storage.save("session-abc", TokenSlot.SESSION_TOKEN)
+        val callFactory = CookielessHttpClientFactory.create(configuration)
+        val auth = AuthService(configuration, storage, callFactory)
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"token":"${WireFixtures.jwt()}"}"""))
+        auth.restoreSession()
+        server.takeRequest() // the restoreSession JWT exchange
+        val client = ApiClient(configuration, callFactory, auth)
+
+        // Force the next call to re-mint, and enqueue nothing for that
+        // exchange so it is still in flight when we cancel.
+        auth.invalidateJwt()
+
+        val deferred = async { client.searchLibrary(artist = "Juana", title = null) }
+        runCurrent()
+        val recorded = server.takeRequest(5, TimeUnit.SECONDS)
+        assertNotNull(recorded, "expected the /auth/token refresh to reach the server before cancelling")
+        assertEquals("/auth/token", recorded!!.requestUrl!!.encodedPath)
 
         deferred.cancel()
         val thrown = runCatching { deferred.await() }.exceptionOrNull()

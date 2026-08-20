@@ -79,14 +79,12 @@ private data class AddToBinRequestDto(
 private val jsonRequestBodyMediaType = "application/json; charset=utf-8".toMediaType()
 
 /**
- * Suspend bridge from [Call.enqueue] to structured concurrency. Duplicated
- * from [AuthWireClient]'s private copy of the same function rather than
- * shared — a parallel PR is landing OTP changes to `AuthWireClient.kt`, and
- * this bridge is small enough that copying it once is cheaper than the
- * coordination cost of extracting a shared home out from under that work.
- * No added dependency: this is the standard callback-to-coroutine pattern,
- * not a substitute for `okhttp3:okhttp-coroutines`, which this module does
- * not depend on.
+ * Suspend bridge from [Call.enqueue] to structured concurrency. Currently
+ * duplicated from [AuthWireClient]'s private copy of the same function;
+ * consolidating the two is tracked separately and deliberately left out of
+ * this change. No added dependency: this is the standard
+ * callback-to-coroutine pattern, not a substitute for
+ * `okhttp3:okhttp-coroutines`, which this module does not depend on.
  *
  * This is also the mechanism that keeps [ApiClient] off a dispatcher hop:
  * [Call.enqueue] runs the request on OkHttp's own dispatcher pool, and
