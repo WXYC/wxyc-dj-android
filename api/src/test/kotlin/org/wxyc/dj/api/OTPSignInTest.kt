@@ -75,6 +75,9 @@ class OTPSignInTest {
         assertEquals(1, session.recordedRequests.size)
         assertTrue(session.recordedRequests[0].url.encodedPath.endsWith("/auth/email-otp/send-verification-otp"))
         assertEquals("juana@wxyc.org", destination.email)
+        // The DJ typed this address themselves, so it is safe to echo back —
+        // the whole point [LoginCodeDestination.typedEmail] exists to gate.
+        assertEquals("juana@wxyc.org", destination.typedEmail)
     }
 
     /**
@@ -98,6 +101,11 @@ class OTPSignInTest {
         assertEquals("juana@wxyc.org", sendBody["email"]?.jsonPrimitive?.content)
         assertEquals("sign-in", sendBody["type"]?.jsonPrimitive?.content)
         assertEquals("juana@wxyc.org", destination.email)
+        // Resolved from the username, not typed by the DJ — must never be
+        // disclosed. This is the leak the blocking finding closes: a prior
+        // version of this test asserted only `.email`, so a refactor that
+        // published the resolved address as `typedEmail` still shipped green.
+        assertNull(destination.typedEmail)
     }
 
     /**
@@ -155,6 +163,35 @@ class OTPSignInTest {
 
         assertEquals(AuthError.Rejected("Invalid email"), thrown)
         assertEquals(1, session.recordedRequests.size) // lookup skipped on the @
+    }
+
+    // MARK: - Resending a code
+
+    /**
+     * The one test that actually inspects what [AuthService.resendLoginCode]
+     * sends over the wire — every other test that reaches it drives it with
+     * no stub queued (see the transport-classification section below), so
+     * none of them can tell a correct resend from a broken one. Pins the
+     * documented purpose directly: a resend must speak straight to
+     * `send-verification-otp` with the already-resolved address, spending
+     * exactly **one** request and never re-running
+     * `POST /auth/wxyc/lookup-email` for an answer that cannot have
+     * changed — the double-spend a mutation that inlined the lookup here
+     * would otherwise ship green.
+     */
+    @Test
+    fun `resendLoginCode re-sends the code without re-resolving the address`() = runTest {
+        val session = GatedAuthSession()
+        val (service, _) = makeService(session)
+        enqueueSendOk(session)
+
+        service.resendLoginCode("juana@wxyc.org")
+
+        assertEquals(1, session.recordedRequests.size)
+        assertTrue(session.recordedRequests[0].url.encodedPath.endsWith("/auth/email-otp/send-verification-otp"))
+        val body = bodyAsJson(session.recordedRequests[0])
+        assertEquals("juana@wxyc.org", body["email"]?.jsonPrimitive?.content)
+        assertEquals("sign-in", body["type"]?.jsonPrimitive?.content)
     }
 
     // MARK: - Verifying the code
@@ -323,6 +360,41 @@ class OTPSignInTest {
         assertTrue(service.lastError.value != null)
 
         service.clearLastError()
+        assertNull(service.lastError.value)
+    }
+
+    /**
+     * [AuthService.sendLoginCode] clears [AuthService.lastError] on entry,
+     * exactly as [AuthService.signIn] does — without it, a stale message
+     * from an earlier failed attempt (e.g. an unknown username) would still
+     * be on screen under a fresh, successful code request.
+     */
+    @Test
+    fun `sendLoginCode clears a stale error on entry`() = runTest {
+        val session = GatedAuthSession()
+        val (service, _) = makeService(session)
+        enqueueLookup(session, email = null)
+        runCatching { service.sendLoginCode("nobody") }
+        assertEquals(AuthError.Rejected("No account matches that username"), service.lastError.value)
+
+        enqueueSendOk(session)
+        service.sendLoginCode("juana@wxyc.org")
+
+        assertNull(service.lastError.value)
+    }
+
+    /** The same guard, for [AuthService.resendLoginCode]'s own entry clear. */
+    @Test
+    fun `resendLoginCode clears a stale error on entry`() = runTest {
+        val session = GatedAuthSession()
+        val (service, _) = makeService(session)
+        // No stub queued: the first resend fails at the transport layer.
+        runCatching { service.resendLoginCode("juana@wxyc.org") }
+        assertTrue(service.lastError.value is AuthError.NetworkFailure)
+
+        enqueueSendOk(session)
+        service.resendLoginCode("juana@wxyc.org")
+
         assertNull(service.lastError.value)
     }
 

@@ -164,11 +164,15 @@ internal class AuthWireClient(
      * address after silently discarding the code, which is why a mistyped
      * *email* can't be reported here (a mistyped *username* is caught
      * earlier, by [lookupEmail]).
+     *
+     * No `rejectionMessage` hook — unlike [verifyOtp], this leg's whole
+     * point is rendering better-auth's own message (e.g. `INVALID_EMAIL`)
+     * verbatim, and both callers ([AuthService.sendLoginCode],
+     * [AuthService.resendLoginCode]) want exactly that, so there is nothing
+     * for a parameter to vary. Mirrors iOS's `sendVerificationCode(to:)`,
+     * which takes no such parameter either.
      */
-    suspend fun sendVerificationOtp(
-        email: String,
-        rejectionMessage: (code: String?, message: String?) -> String? = { _, message -> message },
-    ) {
+    suspend fun sendVerificationOtp(email: String) {
         val body = json.encodeToString(SendLoginCodeRequestDto.serializer(), SendLoginCodeRequestDto(email, type = "sign-in"))
         val response = postJson("email-otp/send-verification-otp", body)
         when (response.statusCode) {
@@ -176,7 +180,7 @@ internal class AuthWireClient(
             429 -> throw AuthError.RateLimited
             400, 403 -> {
                 val error = decodeError(response.body)
-                throw AuthError.Rejected(rejectionMessage(error?.code, error?.message))
+                throw AuthError.Rejected(error?.message)
             }
             else -> throw AuthError.ServerFailure(response.statusCode, decodeError(response.body)?.message)
         }
@@ -191,12 +195,17 @@ internal class AuthWireClient(
      * and possibly misstate, an invariant [establishSession] already owns.
      * [rejectionMessage] is the only thing a caller varies; see
      * [OTPRejection] for the friendlier wording this route's caller
-     * supplies.
+     * supplies. No default here: unlike [establishSession] (whose default
+     * genuinely serves a second caller, [signIn]'s password routes, which
+     * want the server's own wording untouched), this method has exactly one
+     * caller and that caller always supplies [OTPRejection.copyFor] — so a
+     * default would never be taken, and leaving it required keeps that
+     * fact visible at the call site instead.
      */
     suspend fun verifyOtp(
         email: String,
         otp: String,
-        rejectionMessage: (code: String?, message: String?) -> String? = { _, message -> message },
+        rejectionMessage: (code: String?, message: String?) -> String?,
     ): String {
         val body = json.encodeToString(OTPSignInRequestDto.serializer(), OTPSignInRequestDto(email, otp))
         return establishSession("sign-in/email-otp", body, rejectionMessage)
