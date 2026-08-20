@@ -12,8 +12,17 @@ import java.time.ZoneId
  * or the other for the same album on the same screen, so any divergence
  * between them reads as the app contradicting itself. Mirrors
  * `RotationPredicate.swift` (iOS issue #93).
+ *
+ * `internal`, matching iOS: the lexicographic compare below is only correct
+ * for zero-padded `YYYY-MM-DD` input, which is an invariant this object has
+ * no way to enforce on a caller's raw `String`. Callers are meant to reach it
+ * through their DTO's public `Instant`/`ZoneId`-taking `isInRotation(...)`
+ * (e.g. [AlbumInfo.Rotation.isInRotation]), which derives that day itself via
+ * [localDay] rather than accepting one. `:api` tests reach these members
+ * directly because Gradle's Kotlin JVM plugin treats a module's `test`
+ * source set as a friend compilation of its `main` source set.
  */
-object RotationPredicate {
+internal object RotationPredicate {
     /**
      * Mirrors the server's published predicate — `rotation_bin != null &&
      * (kill_date == null || kill_date > today)` — evaluated against the

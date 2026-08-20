@@ -113,16 +113,36 @@ object BinSorting {
     /**
      * `Locale.US`, [Collator.PRIMARY] strength (case- and accent-insensitive —
      * "Molina" and "molina" sort together, as do "Nilüfer" and "Nilufer"),
-     * [Collator.FULL_DECOMPOSITION] (normalizes precomposed vs. combining-mark
-     * accent forms before comparing, so the same visual name sorts the same
-     * regardless of which Unicode form the wire used). Both knobs are pinned
-     * explicitly rather than left at the platform default — that default is
-     * exactly the thing that is not guaranteed to agree between the desktop
-     * JVM and `android.icu`.
+     * [Collator.CANONICAL_DECOMPOSITION] (normalizes precomposed vs.
+     * combining-mark accent forms before comparing, so the same visual name
+     * sorts the same regardless of which Unicode form the wire used). Both
+     * knobs are pinned explicitly rather than left at the platform default —
+     * that default is exactly the thing that is not guaranteed to agree
+     * between the desktop JVM and `android.icu`.
+     *
+     * **`CANONICAL_DECOMPOSITION`, never `FULL_DECOMPOSITION`.** Android's
+     * `java.text.Collator` is `android.icu`-backed, and its private
+     * `decompositionMode_Java_ICU(int)` converter accepts *only*
+     * `CANONICAL_DECOMPOSITION` and `NO_DECOMPOSITION` — every other value,
+     * including `FULL_DECOMPOSITION`, falls through its switch to
+     * `throw new IllegalArgumentException("Bad mode: " + mode)`. That is
+     * unconditionally fatal on every supported API level: the desktop JVM's
+     * `RuleBasedCollator` accepts `FULL_DECOMPOSITION` (which is why a plain
+     * `:api:test` run can't catch this), but the first Bin-tab load on a real
+     * phone would throw before comparing a single name. Canonical
+     * decomposition is sufficient for the precomposed-vs-combining-mark
+     * normalization this method exists for; full (compatibility)
+     * decomposition additionally folds things like ligatures and width
+     * variants, which this sort has no need of. Do not "upgrade" this back to
+     * `FULL_DECOMPOSITION` — see `BinEntryTest`'s
+     * `newCollator uses a decomposition mode Android's Collator actually
+     * accepts` case for the host-side regression pin, and the SDK source at
+     * `java/text/Collator.java` (`setDecomposition` /
+     * `decompositionMode_Java_ICU`) for the throwing switch itself.
      */
     fun newCollator(): Collator = Collator.getInstance(Locale.US).apply {
         strength = Collator.PRIMARY
-        decomposition = Collator.FULL_DECOMPOSITION
+        decomposition = Collator.CANONICAL_DECOMPOSITION
     }
 
     private fun compareBy(collator: Collator, selector: (BinEntry) -> String): Comparator<BinEntry> =

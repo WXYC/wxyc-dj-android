@@ -37,7 +37,7 @@ data class AlbumInfo(
     @SerialName("album_artist") val albumArtist: String? = null,
     @SerialName("plays") val plays: Int? = null,
     @SerialName("on_streaming") val onStreaming: Boolean? = null,
-    @SerialName("artwork_url") val artworkURL: String? = null,
+    @SerialName("artwork_url") val artworkUrl: String? = null,
     @SerialName("rotation") val rotation: Rotation? = null,
 ) {
     /** Shelf call number, mirroring [AlbumSearchResult.callNumber]. */
@@ -125,8 +125,12 @@ data class AlbumInfo(
 
         /**
          * Pure core of [isInRotation]. [today] MUST be the zero-padded
-         * `YYYY-MM-DD` local day [RotationPredicate.localDay] produces.
+         * `YYYY-MM-DD` local day [RotationPredicate.localDay] produces —
+         * the same reason this stays `internal` rather than public; callers
+         * outside `:api` go through [isInRotation]'s `Instant`/`ZoneId`
+         * overload instead.
          */
-        fun isInRotation(today: String): Boolean = RotationPredicate.isInRotation(bin = rotationBin, killDay = killDate, today = today)
+        internal fun isInRotation(today: String): Boolean =
+            RotationPredicate.isInRotation(bin = rotationBin, killDay = killDate, today = today)
     }
 }

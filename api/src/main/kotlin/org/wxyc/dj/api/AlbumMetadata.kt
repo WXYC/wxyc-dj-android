@@ -45,6 +45,13 @@ data class AlbumMetadata(
     }
 }
 
+/**
+ * The streaming services [AlbumMetadata] carries a per-service URL for, each
+ * a search-URL fallback when LML has no direct match. [urlIn] is the
+ * indirection a UI iterates over — one loop building a row per service that
+ * has a URL, instead of five near-identical hand-written rows each reading a
+ * different `AlbumMetadata` field.
+ */
 enum class StreamingService(val label: String) {
     Spotify("Spotify"),
     AppleMusic("Apple Music"),
