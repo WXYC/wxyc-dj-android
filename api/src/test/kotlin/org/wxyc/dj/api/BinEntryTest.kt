@@ -110,11 +110,14 @@ class BinEntryTest {
 
     @Test
     fun `sorting is stable across the diacritic-bearing pool from wxyc-example-data`() {
-        // Aşıq Altay, Csillagrablók, GIDEÖN, Hermanos Gutiérrez, Nilüfer Yanya —
-        // the entries the three headline fixtures don't supply. Primary
-        // strength + full decomposition means the sort key is accent- and
-        // case-insensitive, so this order must match plain alphabetical order
-        // on the ASCII skeleton of each name.
+        // Two real WXYC artists, each as an (unaccented, accented, sentinel)
+        // triple — see Fixtures.diacriticBearingArtists for why the triple
+        // shape is what gives this pool discriminating power. Primary
+        // strength + canonical decomposition means the sort key is accent-
+        // and case-insensitive, so each artist's unaccented/accented pair
+        // must land adjacent to each other, ahead of that artist's sentinel,
+        // rather than the sentinel splitting the pair the way plain
+        // code-point order would.
         val entries = Fixtures.diacriticBearingArtists().mapIndexed { index, name ->
             BinEntry(
                 albumId = index,
@@ -127,7 +130,14 @@ class BinEntryTest {
         val sorted = BinSorting.sorted(entries).map { it.sortName }
 
         assertEquals(
-            listOf("Aşıq Altay", "Csillagrablók", "GIDEÖN", "Hermanos Gutiérrez", "Nilüfer Yanya"),
+            listOf(
+                "Hermanos Gutierrez",
+                "Hermanos Gutiérrez",
+                "Hermanos Gutizz",
+                "Nilufer Yanya",
+                "Nilüfer Yanya",
+                "Nilzz Yanya",
+            ),
             sorted,
         )
     }

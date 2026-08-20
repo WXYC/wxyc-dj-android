@@ -86,17 +86,30 @@ object Fixtures {
     fun binEntries(): List<BinEntry> = BinResponse.decode(binResponseJSON)
 
     /**
-     * The diacritic-bearing entries from `wxyc-example-data.json`'s
-     * `canonicalArtistNames` pool, which the three headline fixtures above
-     * don't supply. Used to pin [BinSorting] against Android's
+     * A collation probe pool, not a plain list of diacritic-bearing names.
+     * Two real WXYC artists from `wxyc-example-data.json`'s
+     * `canonicalArtistNames` pool — "Hermanos Gutiérrez" and "Nilüfer Yanya" —
+     * each appear as a triple: the accented form, an unaccented spelling of
+     * the same name, and a synthetic sentinel (`"Hermanos Gutizz"`,
+     * `"Nilzz Yanya"` — deliberate ordering probes, not real artists) whose
+     * next ASCII letter sorts after both. Under primary-strength collation
+     * the accented and unaccented spellings of one name are equal (the
+     * accent is ignored) and both sort before the sentinel; under plain
+     * code-point order the accented character's high code point pushes it
+     * *after* the sentinel, splitting the pair. That is the property this
+     * pool is for: a comparator that silently dropped collation for
+     * `String.compareTo` would still pass a pool where every entry is
+     * decided by its ASCII-only prefix (the previous version of this pool),
+     * but fails on this one. Used to pin [BinSorting] against Android's
      * `java.text.Collator`-via-`android.icu` divergence risk (issue #5,
      * invariant 15).
      */
     fun diacriticBearingArtists(): List<String> = listOf(
-        "Aşıq Altay",
-        "Csillagrablók",
-        "GIDEÖN",
+        "Hermanos Gutierrez",
         "Hermanos Gutiérrez",
+        "Hermanos Gutizz",
+        "Nilufer Yanya",
         "Nilüfer Yanya",
+        "Nilzz Yanya",
     )
 }
