@@ -1,5 +1,6 @@
 package org.wxyc.dj.api
 
+import java.text.Collator
 import kotlinx.serialization.SerializationException
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -73,6 +74,30 @@ class BinEntryTest {
     }
 
     @Test
+    fun `the album-title tiebreak actually runs when filing names collide`() {
+        // The common real case: one artist with several releases in a bin.
+        // A two-row fixture with distinct sortNames (as above) never reaches
+        // BinEntry.kt's `.thenComparator` leg, so this pins it directly —
+        // deleting that leg must fail this test.
+        val entries = listOf(
+            BinEntry(
+                albumId = 1,
+                albumTitle = "Zzyzx",
+                artistName = "Juana Molina",
+                alphabeticalName = "Molina, Juana",
+            ),
+            BinEntry(
+                albumId = 2,
+                albumTitle = "DOGA",
+                artistName = "Juana Molina",
+                alphabeticalName = "Molina, Juana",
+            ),
+        )
+        val sorted = BinSorting.sorted(entries)
+        assertEquals(listOf("DOGA", "Zzyzx"), sorted.map { it.albumTitle })
+    }
+
+    @Test
     fun `sortName falls back to artistName when alphabetical_name is absent`() {
         val raw = """
             {
@@ -105,5 +130,19 @@ class BinEntryTest {
             listOf("Aşıq Altay", "Csillagrablók", "GIDEÖN", "Hermanos Gutiérrez", "Nilüfer Yanya"),
             sorted,
         )
+    }
+
+    @Test
+    fun `newCollator uses a decomposition mode Android's Collator actually accepts`() {
+        // Regression pin for a crash that a desktop-only :api:test run cannot
+        // otherwise catch: Android's java.text.Collator is android.icu-backed,
+        // and its private decompositionMode_Java_ICU(int) converter accepts
+        // only CANONICAL_DECOMPOSITION and NO_DECOMPOSITION — every other
+        // value, including FULL_DECOMPOSITION, throws
+        // IllegalArgumentException("Bad mode: " + mode) unconditionally. The
+        // desktop JVM's RuleBasedCollator tolerates FULL_DECOMPOSITION, so
+        // this assertion — not the sort behavior above — is what makes
+        // reintroducing that mode fail on the host instead of only on device.
+        assertEquals(Collator.CANONICAL_DECOMPOSITION, BinSorting.newCollator().decomposition)
     }
 }

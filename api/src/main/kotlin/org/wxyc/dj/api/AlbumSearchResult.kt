@@ -49,7 +49,7 @@ data class AlbumSearchResult(
     @SerialName("plays") val plays: Int? = null,
     @SerialName("on_streaming") val onStreaming: Boolean? = null,
     @SerialName("album_artist") val albumArtist: String? = null,
-    @SerialName("artwork_url") val artworkURL: String? = null,
+    @SerialName("artwork_url") val artworkUrl: String? = null,
     // Per-element, not a plain List<TrackMatchHint>: LML is a separately
     // deployed service, and Backend-Service passes matched_via through
     // unvalidated, so one malformed hint on the wire must not fail this whole

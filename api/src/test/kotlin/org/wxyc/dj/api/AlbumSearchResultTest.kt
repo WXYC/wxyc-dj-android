@@ -122,13 +122,35 @@ class AlbumSearchResultTest {
 
     @Test
     fun `decodes an unrecognized match source as Unknown rather than failing`() {
+        // "wire_source_the_client_has_never_seen" is deliberately not a value
+        // api.yaml's TrackMatchSource schema declares today (cta,
+        // discogs_release, discogs_master, library_identity) — a prior
+        // version of this test used "musicbrainz_recording", which reads as
+        // a plausible real future source rather than an unambiguously
+        // fictional one, so it left this case under-specified about exactly
+        // what "unrecognized" means to cover.
         val raw = """
             {
               "id": 1, "album_title": "x", "artist_name": "y",
-              "matched_via": [ { "title": "song", "source": "musicbrainz_recording" } ]
+              "matched_via": [ { "title": "song", "source": "wire_source_the_client_has_never_seen" } ]
             }
         """.trimIndent()
         assertEquals(TrackMatchSource.Unknown, decode(raw).matchedVia.single().source)
+    }
+
+    @Test
+    fun `decodes discogs_release as its own case, not Unknown`() {
+        // The value api.yaml's TrackMatchSource schema declares that the
+        // original enum omitted — a live pathway (Track 2's release-level
+        // Discogs match) that silently fell through to Unknown, the same
+        // sentinel a genuinely-unknown value gets.
+        val raw = """
+            {
+              "id": 1, "album_title": "x", "artist_name": "y",
+              "matched_via": [ { "title": "song", "source": "discogs_release" } ]
+            }
+        """.trimIndent()
+        assertEquals(TrackMatchSource.DiscogsRelease, decode(raw).matchedVia.single().source)
     }
 
     @Test

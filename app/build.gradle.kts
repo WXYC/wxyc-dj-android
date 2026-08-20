@@ -115,7 +115,12 @@ dependencies {
     // The one place the pure-JVM :api/:app split can produce false confidence
     // (see BinSorting's KDoc): Android's java.text.Collator delegates to
     // android.icu, and the desktop JVM's does not, so a green :api:test alone
-    // doesn't prove the bin sort order holds on device. Robolectric runs the
-    // real platform Collator on the JVM without an emulator.
+    // doesn't prove the bin sort order holds on device. Robolectric cannot
+    // load the real java.text.Collator façade either — its
+    // SdkSandboxClassLoader only sandboxes android.*, so java.text.Collator
+    // still resolves to the bootstrap JDK's RuleBasedCollator under this
+    // runner — but android.icu.text.Collator, the class that façade actually
+    // delegates to on device, *is* loadable here. BinCollationParityTest
+    // builds one directly and checks it against BinSorting's ordering.
     testImplementation(libs.robolectric)
 }
