@@ -156,9 +156,9 @@ class AuthService(
     /**
      * The credential-agnostic half of signing in: everything from
      * [AuthState.SigningIn] through to a settled signed-in/signed-out state,
-     * parameterized only by how leg 1 obtains a session token. A future
-     * credential route (issue #4's OTP sign-in) supplies its own
-     * `establishing` closure and inherits every invariant below rather than
+     * parameterized only by how leg 1 obtains a session token. [signIn] and
+     * [signInWithCode] (issue #4's OTP sign-in) each supply their own
+     * `establishing` closure and inherit every invariant below rather than
      * restating — possibly wrongly — the transient/terminal split (2), the
      * generation bump (3), and the leave-no-trace rollback.
      */
@@ -219,6 +219,104 @@ class AuthService(
         }
     }
 
+    /**
+     * Mail a one-time sign-in code to the DJ behind [identifier] (issue #4).
+     *
+     * Two legs, the first often skipped: `POST /auth/wxyc/lookup-email`
+     * resolves a username to the address the code goes to — an identifier
+     * containing `@` skips it entirely, since [SignInIdentifier] classifies
+     * it as an email and the resolver's own first line would just echo it
+     * back unchanged. Then `POST /auth/email-otp/send-verification-otp`
+     * mails a 6-digit code valid for five minutes.
+     *
+     * Deliberately does **not** touch [state]. No session exists yet, so
+     * entering [AuthState.SigningIn] would claim one is being established
+     * and strand a caller in a spinner state on failure — the caller (the
+     * login screen's view model) owns this step's in-flight indicator
+     * instead. [lastError] is cleared on entry, exactly as [signIn] clears
+     * it, and any failure is recorded there before rethrowing — the same
+     * one-surface convention [signIn] and [signInWithCode] use, via
+     * [recordingFailure], so a failed resend can't go both unrendered and
+     * erase a message already on screen.
+     *
+     * @return The address the code went to, plus how much of it may be
+     *   shown — see [LoginCodeDestination].
+     * @throws AuthError.Rejected When no account matches a username
+     *   identifier.
+     * @throws AuthError.RateLimited On a 429 from either leg.
+     */
+    suspend fun sendLoginCode(identifier: String): LoginCodeDestination {
+        _lastError.value = null
+        return recordingFailure {
+            val classified = SignInIdentifier(identifier)
+            val email = when (classified) {
+                is SignInIdentifier.Email -> classified.raw
+                is SignInIdentifier.Username -> wire.lookupEmail(classified.raw)
+                    // `{"email": null}` (or empty) is the one failure this flow
+                    // can name precisely. Says "username", never "username or
+                    // email", because an identifier holding an `@` never
+                    // reaches the lookup at all.
+                    ?: throw AuthError.Rejected("No account matches that username")
+            }
+            wire.sendVerificationOtp(email)
+            LoginCodeDestination(email = email, typedEmail = classified.typedEmail)
+        }
+    }
+
+    /**
+     * Mail another code to an address [sendLoginCode] already resolved
+     * (issue #4).
+     *
+     * Skips the lookup by construction, which is the point: routing a
+     * resend back through [sendLoginCode] would re-POST
+     * `/auth/wxyc/lookup-email` for a username — an answer that cannot have
+     * changed, since the identifier field isn't even on screen by then —
+     * and spend **two** slots of Backend-Service's per-IP budget where one
+     * would do, in precisely the situation (slow mail, an expired code)
+     * where a DJ is most likely to tap again.
+     */
+    suspend fun resendLoginCode(to: String) {
+        _lastError.value = null
+        recordingFailure {
+            wire.sendVerificationOtp(to)
+        }
+    }
+
+    /**
+     * Sign a DJ in with a code mailed by [sendLoginCode] (issue #4).
+     *
+     * `POST /auth/sign-in/email-otp` is a peer of the two password
+     * routes — same `setSessionCookie`, same global `bearer()` plugin, so
+     * the same `set-auth-token` header — which is why this is a single call
+     * into [completeSignIn] and [AuthWireClient.verifyOtp] rather than a
+     * second state machine. Everything after the token is obtained is
+     * shared with the password path by construction.
+     *
+     * One server-side asymmetry worth knowing, since it is invisible from
+     * here: Backend-Service sets `requireEmailVerification: true`, so an
+     * unverified account is refused at password sign-in — but this route
+     * instead *marks it verified* and proceeds, on the reasoning that
+     * possession of the mailbox is the very proof the verification email
+     * would have demanded.
+     *
+     * @param email [LoginCodeDestination.email], not the DJ's typed
+     *   identifier.
+     * @param otp The DJ's typed code; normalized to digits before it is
+     *   sent.
+     */
+    suspend fun signInWithCode(email: String, otp: String) {
+        completeSignIn {
+            // The server's alphabet is provably 0-9 (better-auth's
+            // defaultOTPGenerator is generateRandomString(otpLength ?? 6,
+            // "0-9"), and Backend-Service overrides otpLength but not
+            // generateOTP), so discarding non-digits can only ever drop
+            // characters a real code cannot contain — and it makes a code
+            // pasted as "123 456" work.
+            val digits = otp.filter { it.isDigit() }
+            wire.verifyOtp(email, digits, rejectionMessage = OTPRejection::copyFor)
+        }
+    }
+
     suspend fun signOut() {
         sessionToken?.let { token -> bestEffort { wire.signOut(token) } }
         clearLocalSession()
@@ -273,6 +371,37 @@ class AuthService(
     /** Drop the last sign-in error without touching the session. */
     fun clearLastError() {
         _lastError.value = null
+    }
+
+    /**
+     * Run [block], recording any failure into [lastError] before rethrowing
+     * the **original** exception untouched — the pre-session-leg
+     * counterpart to [completeSignIn]'s leg-1 catch, so [sendLoginCode] and
+     * [resendLoginCode] report through the same field [signIn] and
+     * [signInWithCode] do. An earlier design that reported only by throwing
+     * forced a caller to keep a second error store and coalesce the two,
+     * which is exactly the hazard this exists to close: a failed resend
+     * that went both unrendered and — because the entry-point clears
+     * [lastError] — erased the message already on screen.
+     *
+     * Rethrows the original [Exception] rather than the classified
+     * [AuthError.NetworkFailure] it records, mirroring [completeSignIn]'s
+     * leg-1 catch: [lastError] is the one place this module decides how to
+     * *classify* a failure, and a caller that wants to pattern-match the
+     * underlying exception type still can.
+     */
+    private suspend fun <T> recordingFailure(block: suspend () -> T): T {
+        try {
+            return block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: AuthError) {
+            _lastError.value = e
+            throw e
+        } catch (e: Exception) {
+            _lastError.value = AuthError.NetworkFailure(e.message ?: e.toString())
+            throw e
+        }
     }
 
     private suspend fun refreshJwt(): JwtPayload {
