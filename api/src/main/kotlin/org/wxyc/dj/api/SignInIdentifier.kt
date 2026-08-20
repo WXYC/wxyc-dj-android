@@ -51,6 +51,33 @@ sealed class SignInIdentifier {
 
     data class Email(override val raw: String) : SignInIdentifier()
 
+    /**
+     * The DJ's own typed email, when that is what they typed (issue #4).
+     *
+     * The same `@` classification answers a second question, beside routing:
+     * whether the app already knows the DJ's email, or had to *ask the
+     * server for it*. `POST /auth/wxyc/lookup-email` resolves a username to
+     * an address — a call Backend-Service documents as "a mild enumeration
+     * vector", accepted because it is rate-limited. Rendering its answer
+     * would take a vector bounded by request rate and put it on screen, so a
+     * looked-up address is never displayed; only one the DJ typed themselves
+     * is. dj-site draws the identical line in `LoginFormSwitcher.tsx`.
+     *
+     * Lives here, beside the routing decision, so the `@` predicate is
+     * applied in exactly one place. [AuthService.sendLoginCode] hands the
+     * result out as [LoginCodeDestination.typedEmail] so callers never need
+     * to see this type at all.
+     *
+     * Returns the *fact* — "the DJ typed this address" — rather than display
+     * copy; the wording for the `null` case belongs to whichever surface
+     * renders it. Mirrors iOS's `SignInIdentifier.typedEmail`.
+     */
+    val typedEmail: String?
+        get() = when (this) {
+            is Email -> raw
+            is Username -> null
+        }
+
     /** Path component appended to the auth base URL. */
     val path: String
         get() = when (this) {
