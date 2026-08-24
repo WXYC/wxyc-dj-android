@@ -43,16 +43,25 @@ data class TrackMatchHint(
  * The mapping is lossy in one direction: [TrackMatchSourceSerializer] decodes
  * *any* unrecognized string to [Unknown], but serializing [Unknown] always
  * writes `unknown_default_open_api` — the original unrecognized string is not
- * retained, so encode(decode(x)) != x for an unrecognized x. **This is no
- * longer merely a latent property.** `:app`'s `AlbumSearchResultNavType`
- * (issue #7's nav skeleton) re-encodes a decoded [org.wxyc.dj.api.AlbumSearchResult]
- * -- which embeds a `List<TrackMatchHint>` via `matchedVia` -- back through
- * `:api`'s [org.wxyc.dj.api.WxycJson] codec every time a search or bin row
- * carrying an unrecognized [TrackMatchSource] value is navigated to an album
- * detail route, so the lossy direction is genuinely exercised in production
- * now, not just in principle. It matches the generated iOS type's behavior,
- * which has the same property for the same reason, and remains harmless here
- * because nothing reads [TrackMatchSource] back off the re-encoded route.
+ * retained, so encode(decode(x)) != x for an unrecognized x. **As of issue
+ * #23 this is a latent property again, and the history is worth keeping.**
+ * It was briefly live: issue #7's `AlbumSearchResultNavType` re-encoded a
+ * decoded [org.wxyc.dj.api.AlbumSearchResult] -- which embeds a
+ * `List<TrackMatchHint>` via `matchedVia` -- back through
+ * [org.wxyc.dj.api.WxycJson] on every navigation to an album detail, so any
+ * row carrying an unrecognized [TrackMatchSource] genuinely round-tripped
+ * through the lossy direction. Issue #23 made `AlbumRoute` id-only and
+ * deleted that `NavType`, so no production path re-encodes a decoded
+ * [org.wxyc.dj.api.AlbumSearchResult] any more. It matches the generated
+ * iOS type's behavior, which has the same property for the same reason.
+ *
+ * What would make it live again: anything that decodes an
+ * [org.wxyc.dj.api.AlbumSearchResult] from the server and re-encodes it for
+ * storage or transport -- an offline row cache, a saved-state hand-off that
+ * serializes the row rather than holding it in memory the way
+ * `AlbumRouteFallbackStore` does. Such a path is only safe while nothing
+ * reads [TrackMatchSource] back off the re-encoded copy; check that before
+ * adding one.
  */
 @Serializable(with = TrackMatchSourceSerializer::class)
 enum class TrackMatchSource(val wireValue: String) {
