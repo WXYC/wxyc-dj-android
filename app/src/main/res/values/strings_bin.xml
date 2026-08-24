@@ -2,7 +2,20 @@
 <resources>
     <!-- Owned by issue #11 (ui/bin/BinScreen.kt). Split out of strings.xml by
          issue #7's review so #11 never has to add entries to a file the
-         other three screen issues (#8 through #10) also touch — see strings.xml's
-         own comment. -->
-    <string name="bin_screen_placeholder">Bin coming soon.</string>
+         other three screen issues (#8 through #10) also touch, see strings.xml's
+         own comment.
+
+         Dynamic, per-operation messages (a failed refresh, a failed
+         swipe-to-remove) are deliberately NOT here, BinViewModel builds
+         those from ApiError.message, the same "already-English, assembled
+         in Kotlin rather than a resource" convention that ApiError.kt
+         itself uses (its own messages are plain string literals, since
+         :api is a pure JVM module with no access to Android resources at
+         all). Only the four states' static, always-the-same-text labels
+         live here. -->
+    <string name="bin_error_title">Couldn\'t load bin</string>
+    <string name="bin_retry_button">Retry</string>
+    <string name="bin_empty_title">Bin is empty</string>
+    <string name="bin_empty_hint">Add releases from the Search tab.</string>
+    <string name="bin_remove_action_content_description">Remove from bin</string>
 </resources>
