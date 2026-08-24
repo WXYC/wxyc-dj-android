@@ -1,7 +1,13 @@
 package org.wxyc.dj.ui.nav
 
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
@@ -30,16 +36,22 @@ import org.wxyc.dj.ui.search.SearchScreen
 
 /**
  * The signed-in app shell (issue #7): a two-tab bottom bar (search, bin)
- * over a single [NavHost], with [AlbumRoute] reachable from either tab and
- * coalescing on the back stack by id (see that type's KDoc).
+ * over a single [NavHost], with [AlbumRoute] reachable from either tab.
+ * [AlbumRoute]'s [AlbumRoute.equals]/[AlbumRoute.hashCode] are id-only for
+ * parity with iOS's `AlbumRoute`/`NavigationPath` identity -- see that
+ * type's KDoc for why Navigation Compose does **not** derive back-stack
+ * identity from them the way SwiftUI does.
  *
  * Every destination below is a placeholder body. This whole graph -- tabs,
- * every route, and the album-detail route with its id-only identity --
- * lands in this one issue rather than being split across #8-#11 so those
- * four PRs can run in parallel without four hands touching this same file:
- * each fills in exactly one placeholder screen (`ui/login/LoginScreen.kt`,
- * `ui/search/SearchScreen.kt`, `ui/detail/AlbumDetailScreen.kt`,
- * `ui/bin/BinScreen.kt`) and nothing here needs to change to accommodate it.
+ * every route, and the album-detail route -- lands in this one issue rather
+ * than being split across #8-#11 so those four PRs can run in parallel
+ * without four hands touching this same file: each fills in exactly one
+ * placeholder screen (`ui/login/LoginScreen.kt`, `ui/search/SearchScreen.kt`,
+ * `ui/detail/AlbumDetailScreen.kt`, `ui/bin/BinScreen.kt`). The top bar's
+ * destination-aware back arrow below, and [AlbumDetailScreen]'s [onBack]
+ * parameter, exist so #10 doesn't have to touch this file either -- before
+ * this, the album destination had no back affordance at all, and #10 would
+ * have had to add one here itself.
  *
  * Sign-out lives on the top bar here (issue #7's "reachable from the app
  * shell" requirement) rather than on either tab, so it survives whichever
@@ -49,11 +61,29 @@ import org.wxyc.dj.ui.search.SearchScreen
 @Composable
 fun MainScaffold(onSignOut: () -> Unit) {
     val navController = rememberNavController()
+    val currentBackStackEntry by navController.currentBackStackEntryAsState()
+    val onAlbumDetail = currentBackStackEntry?.destination?.hasRoute<AlbumRoute>() == true
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.app_name)) },
+                title = {
+                    Text(
+                        stringResource(
+                            if (onAlbumDetail) R.string.album_detail_top_bar_title else R.string.app_name,
+                        ),
+                    )
+                },
+                navigationIcon = {
+                    if (onAlbumDetail) {
+                        IconButton(onClick = { navController.navigateUp() }) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = stringResource(R.string.nav_back_content_description),
+                            )
+                        }
+                    }
+                },
                 actions = {
                     TextButton(onClick = onSignOut) {
                         Text(stringResource(R.string.sign_out))
@@ -77,7 +107,10 @@ fun MainScaffold(onSignOut: () -> Unit) {
             composable<AlbumRoute>(
                 typeMap = mapOf(typeOf<AlbumSearchResult?>() to AlbumSearchResultNavType),
             ) { backStackEntry ->
-                AlbumDetailScreen(route = backStackEntry.toRoute())
+                AlbumDetailScreen(
+                    route = backStackEntry.toRoute(),
+                    onBack = { navController.navigateUp() },
+                )
             }
         }
     }
@@ -92,13 +125,13 @@ private fun MainBottomBar(navController: NavHostController) {
         NavigationBarItem(
             selected = currentDestination?.hierarchy?.any { it.hasRoute<SearchRoute>() } == true,
             onClick = { navController.navigateToTab(SearchRoute) },
-            icon = { Text(stringResource(R.string.tab_search_icon)) },
+            icon = { Icon(Icons.Filled.Search, contentDescription = null) },
             label = { Text(stringResource(R.string.tab_search_label)) },
         )
         NavigationBarItem(
             selected = currentDestination?.hierarchy?.any { it.hasRoute<BinRoute>() } == true,
             onClick = { navController.navigateToTab(BinRoute) },
-            icon = { Text(stringResource(R.string.tab_bin_icon)) },
+            icon = { Icon(Icons.Filled.Favorite, contentDescription = null) },
             label = { Text(stringResource(R.string.tab_bin_label)) },
         )
     }
@@ -106,8 +139,21 @@ private fun MainBottomBar(navController: NavHostController) {
 
 /**
  * Standard bottom-tab navigation: reselecting the current tab is a no-op,
- * switching tabs saves/restores each tab's own back stack, and never piles
- * up duplicate copies of a tab's start destination.
+ * and it never piles up duplicate copies of a tab's start destination.
+ *
+ * `saveState`/`restoreState` do **not** save or restore "each tab's own back
+ * stack" -- that recipe assumes each tab is its own nested navigation graph,
+ * and this one isn't: [SearchRoute], [BinRoute], and [AlbumRoute] are three
+ * flat sibling destinations in one [NavHost], sharing a single back stack,
+ * and [AlbumRoute] is reachable from *either* tab rather than owned by one.
+ * `popUpTo(graph.findStartDestination().id)` pops everything above the
+ * graph's start destination on *every* tab switch -- so drilling into
+ * [AlbumRoute] from a tab and then switching away and back does not return
+ * you to it; you land back on that tab's own root screen. What
+ * `saveState`/`restoreState` actually preserve here is each tab-root
+ * destination's *own* saved state (its `ViewModel`s and scroll position, via
+ * Navigation's per-route `SavedStateHandle`) across a switch away and back --
+ * real, but narrower than "a back stack."
  */
 private fun NavHostController.navigateToTab(route: Any) {
     navigate(route) {

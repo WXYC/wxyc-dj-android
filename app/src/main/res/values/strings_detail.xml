@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Owned by issue #10 (ui/detail/AlbumDetailScreen.kt). Split out of
+         strings.xml by issue #7's review so #10 never has to add entries to a
+         file the other three screen issues (#8, #9, #11) also touch — see
+         strings.xml's own comment. album_detail_top_bar_title and
+         nav_back_content_description stay in strings.xml, not here, because
+         they belong to MainScaffold.kt's shell-level top bar, not to this
+         screen's own body. -->
+    <string name="album_detail_screen_placeholder">Release details coming soon.</string>
+    <string name="album_detail_back_button_placeholder">Back</string>
+</resources>

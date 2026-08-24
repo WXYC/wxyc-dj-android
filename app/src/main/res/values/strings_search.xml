@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Owned by issue #9 (ui/search/SearchScreen.kt). Split out of
+         strings.xml by issue #7's review so #9 never has to add entries to a
+         file the other three screen issues (#8, #10, #11) also touch — see
+         strings.xml's own comment. -->
+    <string name="search_screen_placeholder">Search coming soon.</string>
+</resources>

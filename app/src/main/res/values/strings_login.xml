@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Owned by issue #8 (ui/login/LoginScreen.kt). Split out of strings.xml
+         by issue #7's review so #8 never has to add entries to a file the
+         other three screen issues (#9 through #11) also touch — see strings.xml's
+         own comment. -->
+    <string name="login_screen_placeholder">Sign in with your dj.wxyc.org credentials to continue.</string>
+</resources>

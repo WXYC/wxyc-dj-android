@@ -11,17 +11,23 @@ import org.wxyc.dj.api.AuthState
 
 /**
  * Backs [AuthGate] (issue #7). Exposes [AuthService.state] and kicks off
- * `restoreSession()` once per process: [ViewModel] instances survive
- * configuration changes, so `init` running exactly once per real app launch
- * (not per rotation) is what "call restoreSession() on launch" means here --
- * the direct analogue of `WXYCDJApp`'s launch `.task` on iOS.
+ * `restoreSession()` from `init`, mirroring `WXYCDJApp`'s launch `.task` on
+ * iOS.
  *
- * [signOut] is exposed here, not on a separate view model, so the same
- * Hilt-scoped instance [AuthGate] observes is the one [MainScaffold]'s
- * sign-out action calls -- `hiltViewModel()` with no back-stack-entry key
- * resolves to the nearest [androidx.lifecycle.ViewModelStoreOwner] (the
- * hosting Activity), so both call sites share one instance without any
- * extra plumbing.
+ * **Not "once per process."** A [ViewModel] survives configuration changes,
+ * but it is scoped to its owning [androidx.lifecycle.ViewModelStoreOwner]
+ * (the hosting Activity here) -- `init` runs again on any recreation that
+ * clears that store, which is a narrower guarantee than the process
+ * lifetime. What actually makes a repeated `restoreSession()` call harmless
+ * is `:api`'s own guard: `AuthService.restoreSession()` returns immediately
+ * unless `_state.value == AuthState.Unknown`, so calling it more than once
+ * is inert by construction rather than merely unlikely in practice.
+ *
+ * [signOut] is exposed here, not on a separate view model, because there is
+ * only **one** `hiltViewModel()` call site for this class -- in [AuthGate] --
+ * and its result's [signOut] method reference is what [AuthGate] passes down
+ * as `MainScaffold`'s `onSignOut` parameter. `MainScaffold` never resolves
+ * its own instance of this class; it receives a plain function value.
  */
 @HiltViewModel
 class AuthViewModel @Inject constructor(
