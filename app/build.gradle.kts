@@ -190,14 +190,16 @@ dependencies {
 
     // Issue #7: navigation skeleton (type-safe @Serializable routes).
     implementation(libs.androidx.navigation.compose)
-    // No kotlinx-serialization-JSON dependency here, deliberately. :app once
-    // needed one so AlbumSearchResultNavType could round-trip AlbumRoute's
-    // fallback row through :api's WxycJson codec; issue #23 deleted that
-    // NavType (the route is id-only now, and Int needs no custom NavType), so
-    // nothing in :app names the Json type any more. The @Serializable routes
-    // still compile: their generated serializers need serialization-*core*,
-    // which arrives transitively with navigation-compose. Re-add the json
-    // artifact only alongside a real consumer.
+    // No kotlinx-serialization-JSON on the *production* classpath, deliberately.
+    // :app once needed one so AlbumSearchResultNavType could round-trip
+    // AlbumRoute's fallback row through :api's WxycJson codec; issue #23
+    // deleted that NavType (the route is id-only now, and Int needs no custom
+    // NavType), so no main-source file names the Json type any more. The
+    // @Serializable routes still compile: their generated serializers need
+    // serialization-*core*, which arrives transitively with navigation-compose.
+    // It IS a testImplementation below -- LoginViewModelTest parses request
+    // bodies it captured off MockWebServer -- which is the whole point of the
+    // split: a test-only parser must not put a JSON codec in the shipped APK.
 
     // Issue #7: Hilt graph, KSP not kapt.
     implementation(libs.hilt.android)
@@ -219,6 +221,18 @@ dependencies {
     implementation(libs.coil.network.okhttp)
 
     testImplementation(libs.junit4)
+    // Issue #8: LoginViewModel drives a real AuthService against MockWebServer,
+    // the same pattern :api's ApiClientTest already uses -- and
+    // kotlinx-coroutines-test's TestDispatcher is what lets its test-only
+    // MainDispatcherRule (app/src/test/.../ui/login/) run the resend
+    // cooldown's viewModelScope coroutine without a real 30s wait.
+    testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.kotlinx.coroutines.test)
+    // Test-only, and note the scope: issue #23 removed the `implementation`
+    // one when it deleted the last production consumer (see above). This
+    // parses request bodies captured off MockWebServer, so it belongs on the
+    // test classpath and must not drift back onto the production one.
+    testImplementation(libs.kotlinx.serialization.json)
     // The one place the pure-JVM :api/:app split can produce false confidence
     // (see BinSorting's KDoc): Android's java.text.Collator delegates to
     // android.icu, and the desktop JVM's does not, so a green :api:test alone

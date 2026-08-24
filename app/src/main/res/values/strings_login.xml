@@ -1,8 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Owned by issue #8 (ui/login/LoginScreen.kt). Split out of strings.xml
-         by issue #7's review so #8 never has to add entries to a file the
-         other three screen issues (#9 through #11) also touch — see strings.xml's
-         own comment. -->
-    <string name="login_screen_placeholder">Sign in with your dj.wxyc.org credentials to continue.</string>
+    <!-- Issue #8's login screen (`ui/login/LoginScreen.kt`). Store-facing
+         copy is a requirement, not decoration: the Play listing is public,
+         so this screen is what disambiguates a staff tool from a listener
+         app; login_staff_notice must keep stating the dj.wxyc.org
+         credential requirement and the WXYC-staff-only audience. -->
+    <string name="login_app_title">WXYC DJ</string>
+    <string name="login_staff_notice">For WXYC station staff. Sign in with your dj.wxyc.org account.</string>
+
+    <string name="login_identifier_label">Username or email</string>
+    <string name="login_code_footer">We\'ll send a 6-digit code to your registered email.</string>
+    <string name="login_send_code_button">Send login code</string>
+    <string name="login_use_password_button">Sign in with password instead</string>
+
+    <string name="login_password_header">dj.wxyc.org credentials</string>
+    <string name="login_password_label">Password</string>
+    <string name="login_submit_button">Sign In</string>
+    <string name="login_use_code_button">Email me a code instead</string>
+
+    <string name="login_code_label">Verification code</string>
+    <!-- %1$s is either the DJ's own typed email, or the literal "your
+         registered email" (login_generic_email_target) when the address
+         was looked up server-side rather than typed; never the looked-up
+         address itself. See LoginScreen.kt's CodeStage. -->
+    <string name="login_code_sent_footer">Sent to %1$s. It expires in 5 minutes.</string>
+    <string name="login_generic_email_target">your registered email</string>
+    <string name="login_resend_button">Send a new code</string>
+    <string name="login_change_identifier_button">Use a different account</string>
 </resources>

@@ -13,6 +13,8 @@ local.properties
 # Every change from the scaffold on is developed in a worktree, per the org git
 # workflow.
 .worktrees/
+# Agent-worktree tooling drops its own scratch directory at the repo root.
+.claude/
 
 # Signing material never enters the repo. See docs/signing.md — the upload key
 # is identified by SHA-256 fingerprint, held outside version control.
