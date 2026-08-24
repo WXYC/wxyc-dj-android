@@ -190,12 +190,14 @@ dependencies {
 
     // Issue #7: navigation skeleton (type-safe @Serializable routes).
     implementation(libs.androidx.navigation.compose)
-    // AlbumSearchResultNavType round-trips AlbumRoute's fallback through
-    // :api's WxycJson codec directly -- :api keeps kotlinx-serialization-json
-    // as `implementation` (deliberately not exported, see api/build.gradle.kts),
-    // so :app needs its own copy on the compile classpath to reference the
-    // Json type at all, not just to build this module.
-    implementation(libs.kotlinx.serialization.json)
+    // No kotlinx-serialization-JSON dependency here, deliberately. :app once
+    // needed one so AlbumSearchResultNavType could round-trip AlbumRoute's
+    // fallback row through :api's WxycJson codec; issue #23 deleted that
+    // NavType (the route is id-only now, and Int needs no custom NavType), so
+    // nothing in :app names the Json type any more. The @Serializable routes
+    // still compile: their generated serializers need serialization-*core*,
+    // which arrives transitively with navigation-compose. Re-add the json
+    // artifact only alongside a real consumer.
 
     // Issue #7: Hilt graph, KSP not kapt.
     implementation(libs.hilt.android)

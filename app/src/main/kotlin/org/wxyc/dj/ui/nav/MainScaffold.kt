@@ -27,9 +27,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
-import kotlin.reflect.typeOf
 import org.wxyc.dj.R
-import org.wxyc.dj.api.AlbumSearchResult
 import org.wxyc.dj.ui.bin.BinScreen
 import org.wxyc.dj.ui.detail.AlbumDetailScreen
 import org.wxyc.dj.ui.search.SearchScreen
@@ -37,10 +35,11 @@ import org.wxyc.dj.ui.search.SearchScreen
 /**
  * The signed-in app shell (issue #7): a two-tab bottom bar (search, bin)
  * over a single [NavHost], with [AlbumRoute] reachable from either tab.
- * [AlbumRoute]'s [AlbumRoute.equals]/[AlbumRoute.hashCode] are id-only for
- * parity with iOS's `AlbumRoute`/`NavigationPath` identity -- see that
- * type's KDoc for why Navigation Compose does **not** derive back-stack
- * identity from them the way SwiftUI does.
+ * [AlbumRoute] is id-only (issue #23) -- both its `data class` equality and
+ * its encoded route string -- so two differently-sourced navigations to the
+ * same album resolve to one [androidx.navigation.NavBackStackEntry]; see
+ * that type's KDoc for the mechanism and why an earlier, fallback-carrying
+ * shape did not actually hold that property despite claiming to.
  *
  * Every destination below is a placeholder body. This whole graph -- tabs,
  * every route, and the album-detail route -- lands in this one issue rather
@@ -104,9 +103,7 @@ fun MainScaffold(onSignOut: () -> Unit) {
             composable<BinRoute> {
                 BinScreen(onAlbumSelected = { route -> navController.navigate(route) })
             }
-            composable<AlbumRoute>(
-                typeMap = mapOf(typeOf<AlbumSearchResult?>() to AlbumSearchResultNavType),
-            ) { backStackEntry ->
+            composable<AlbumRoute> { backStackEntry ->
                 AlbumDetailScreen(
                     route = backStackEntry.toRoute(),
                     onBack = { navController.navigateUp() },
