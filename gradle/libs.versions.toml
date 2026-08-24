@@ -38,6 +38,13 @@ compose-ui = { module = "androidx.compose.ui:ui" }
 compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 compose-material3 = { module = "androidx.compose.material3:material3" }
+# Version-managed by the Compose BOM, like every entry above it. Declared
+# explicitly rather than consumed as material3's transitive: the nav bar and
+# the detail screen's Up affordance compile against Icons.Filled/AutoMirrored,
+# and a compile-time API this repo uses directly should be named here per this
+# file's own rule. Google has already begun reshuffling the material-icons
+# artifacts, so inheriting it silently is a build break waiting on a BOM bump.
+compose-material-icons-core = { module = "androidx.compose.material:material-icons-core" }
 
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junitJupiter" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }

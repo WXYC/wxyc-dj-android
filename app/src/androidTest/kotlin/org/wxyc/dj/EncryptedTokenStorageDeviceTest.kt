@@ -11,6 +11,7 @@ import com.google.crypto.tink.Aead
 import com.google.crypto.tink.KeyTemplates
 import com.google.crypto.tink.aead.AeadConfig
 import com.google.crypto.tink.integration.android.AndroidKeysetManager
+import dagger.Lazy
 import android.util.Base64
 import java.io.File
 import java.security.GeneralSecurityException
@@ -165,7 +166,10 @@ class EncryptedTokenStorageDeviceTest {
     private suspend fun <T> withFreshStorage(block: suspend (TokenStorage) -> T): T {
         val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         val dataStore = PreferenceDataStoreFactory.create(scope = scope) { testFile }
-        val storage = EncryptedTokenStorage(dataStore, freshAead())
+        // A plain lambda-backed Lazy, not Dagger's memoizing DoubleCheck --
+        // fine here because every withFreshStorage call runs exactly one
+        // storage operation, so .get() is called at most once regardless.
+        val storage = EncryptedTokenStorage(dataStore, Lazy { freshAead() })
         try {
             return block(storage)
         } finally {

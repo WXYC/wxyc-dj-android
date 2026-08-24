@@ -38,9 +38,15 @@ object NetworkModule {
 
     /**
      * The sole owner of this app's no-cookie policy (invariant 1). `:api`'s
-     * [CookielessHttpClientFactory] is the only way to obtain one — this
-     * provider calls it rather than restating the policy, so an `:app`
-     * consumer can never reach a raw, cookie-armed `OkHttpClient` instead.
+     * [CookielessHttpClientFactory] is the only way to obtain a
+     * [CookielessHttpClient] — this provider calls it rather than restating
+     * the policy, so *this module's* client is never the one carrying a jar.
+     * That is narrower than "an `:app` consumer can never reach a raw
+     * `OkHttpClient`": OkHttp is a deliberate `api` dependency of `:api` (see
+     * `api/build.gradle.kts`), so `OkHttpClient.Builder()` is always on
+     * `:app`'s compile classpath regardless of this provider. What
+     * [CookielessHttpClient]'s KDoc actually guarantees is the same narrower
+     * claim — see its "Scope" section.
      */
     @Provides
     @Singleton

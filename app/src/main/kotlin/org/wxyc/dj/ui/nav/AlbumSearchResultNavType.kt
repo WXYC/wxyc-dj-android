@@ -1,9 +1,8 @@
 package org.wxyc.dj.ui.nav
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.navigation.NavType
-import java.net.URLDecoder
-import java.net.URLEncoder
 import org.wxyc.dj.api.AlbumSearchResult
 import org.wxyc.dj.api.WxycJson
 
@@ -19,10 +18,24 @@ import org.wxyc.dj.api.WxycJson
  * shared [WxycJson] codec -- a `Bundle` extra needs no URL-safe encoding.
  * [parseValue]/[serializeAsValue] additionally exist because a type-safe
  * route's *encoded route string* embeds this value inline (for deep linking
- * and route comparison), so those two round-trip through
- * [URLEncoder]/[URLDecoder] instead -- the escape hatch Android's own
- * "custom types in Navigation Compose" guide documents for a non-primitive
- * argument.
+ * and route comparison).
+ *
+ * **[serializeAsValue] encodes exactly once, and [parseValue] does not decode
+ * at all.** Navigation Compose interposes exactly one [Uri.decode] of its own
+ * between the two -- `NavDeepLink.parseInputParams`/argument matching calls
+ * [android.net.Uri.decode] on each path segment before handing it to
+ * [parseValue] -- so [serializeAsValue] uses [Uri.encode] (percent-encoding,
+ * `%20` for a space) to pair with that single decode. An earlier version used
+ * [java.net.URLEncoder]/[java.net.URLDecoder] here (form encoding, `+` for a
+ * space), which is wrong on both ends: [parseValue] decoding *again* is a
+ * second, unpaired decode on top of Navigation's own, and `URLEncoder`'s `+`
+ * is not a [Uri.decode] escape at all, so a value containing a literal `+`
+ * round-tripped as a space and a value containing a literal `%` frequently
+ * made [java.net.URLDecoder] throw -- caught by `NavDeepLink.parseInputParams`
+ * and discarded, silently falling back to the argument's default. See
+ * `AlbumSearchResultNavTypeTest` for the reproduction matrix, driven through a
+ * real [androidx.navigation.NavHostController.navigate] rather than these two
+ * methods called back to back (which cancels the bug out).
  */
 object AlbumSearchResultNavType : NavType<AlbumSearchResult?>(isNullableAllowed = true) {
     private val json get() = WxycJson.json
@@ -36,8 +49,8 @@ object AlbumSearchResultNavType : NavType<AlbumSearchResult?>(isNullableAllowed 
         bundle.getString(key)?.let { json.decodeFromString(serializer, it) }
 
     override fun parseValue(value: String): AlbumSearchResult? =
-        if (value == "null") null else json.decodeFromString(serializer, URLDecoder.decode(value, "UTF-8"))
+        if (value == "null") null else json.decodeFromString(serializer, value)
 
     override fun serializeAsValue(value: AlbumSearchResult?): String =
-        value?.let { URLEncoder.encode(json.encodeToString(serializer, it), "UTF-8") } ?: "null"
+        value?.let { Uri.encode(json.encodeToString(serializer, it)) } ?: "null"
 }

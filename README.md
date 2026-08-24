@@ -6,7 +6,7 @@ This is an **internal tool for WXYC station staff**, not a listener app. The lis
 
 ## Status
 
-Scaffold. The v1 online core — sign-in (mailed one-time code, with a password fallback), library search, album detail with metadata enrichment, and the per-DJ bin — is being built out issue by issue. The offline half (catalog clone, on-device search index, background refresh, system-search integration) is phase 2.
+Scaffold. The app shell — the Hilt dependency graph, encrypted (DataStore + Tink) token storage, the three-state auth gate, and the full navigation skeleton — has landed (issue #7), so the four v1 screens (sign-in with a mailed one-time code and a password fallback, library search, album detail with metadata enrichment, and the per-DJ bin) can now be built out in parallel, one issue per screen. See `CLAUDE.md`'s "App shell" section for the Hilt module layout and the file each screen issue owns. The offline half (catalog clone, on-device search index, background refresh, system-search integration) is phase 2.
 
 ## Layout
 

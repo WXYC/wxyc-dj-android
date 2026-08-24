@@ -45,6 +45,36 @@ That property is what makes a public repo safe here, so protect it:
 - **Never commit a credential literal** — no API key, secret, token, password or keystore, in source, in a test fixture, or in a comment. Not even a "temporary" one, and not even one already in a gitignored file. `WXYC-Android` has a live example of exactly that failure ([#38](https://github.com/WXYC/WXYC-Android/issues/38)): a Discogs key hardcoded in a header literal *beside* a working `BuildConfig` wiring for the same value, committed to a public repo, where rotation is now the only remedy.
 - If a genuine third-party credential ever becomes necessary, that is a design conversation first — not a `secrets.properties` added in passing.
 
+## App shell (`:app`, issue #7)
+
+The Hilt graph, the encrypted token store, the auth gate, and the nav skeleton all landed in one PR so #8-#11 (login, search, detail, bin) could build in parallel against a stable shell. Four things worth knowing before touching any of it:
+
+**Hilt module layout.** Every `@Module`/`@EntryPoint` lives in `app/src/main/kotlin/org/wxyc/dj/di/`, per "`:api` is a pure JVM module" above — Hilt is Android-only, so `:api` can expose only plain constructors for these to wire:
+
+- `ApiModule` — `:api`'s session layer: `AuthService` and `ApiClient`.
+- `NetworkModule` — `Configuration` (`.production` only; `.localDevelopment` is unwired pending a debug-only cleartext allowance), the no-cookie `CookielessHttpClient` (via `:api`'s `CookielessHttpClientFactory`, never constructed directly), and Coil's `ImageLoader` (built over that same client as its `Call.Factory`, so Coil never spins up a second, cookie-armed `OkHttpClient`).
+- `TokenStorageModule` — the encrypted `TokenStorage` binding. See the next section for what it actually does.
+- `AppEntryPoint` — a Hilt `@EntryPoint`, not a `@Module`, and its only consumer is `HiltGraphDeviceTest`: it exposes every top-level binding above so an instrumented test can resolve the real production graph on a real Keystore/DataStore without an `@AndroidEntryPoint` host.
+
+**DataStore + Tink storage, and the backup-exclusion tie-in.** `token/EncryptedTokenStorage.kt` stores ciphertext in a `DataStore<Preferences>`; a Tink `Aead` does the encrypting, over a random AES256-GCM data-encryption key that Tink generates once and wraps (never derives — there is no KDF) with an Android Keystore master key. `TokenStorageModule.provideAead` builds that `Aead` via `AndroidKeysetManager`, and injects it into `EncryptedTokenStorage` as a `dagger.Lazy<Aead>` rather than eagerly — deferring the Keystore/Tink I/O off the main thread and out of `hiltViewModel()`'s composition-time resolution (see that file's KDoc for the full chain). A first-read failure (a corrupted keyset blob, or an invalidated Keystore key) is caught, the keyset preferences file is wiped, and the keyset is rebuilt once — degrading to "the DJ signs in again" instead of crashing `MainActivity` on every subsequent launch. `TokenStorageRegenerationDeviceTest` pins that regenerate path against a real, corrupted Keystore-wrapped keyset. Neither the ciphertext DataStore file nor Tink's wrapped-keyset `SharedPreferences` file may ever leave the device: `AndroidManifest.xml`'s `allowBackup="false"` (cloud backup) plus `res/xml/data_extraction_rules.xml` (device-to-device transfer, Android 12+) exclude every `file`/`sharedpref`/`database` domain outright rather than naming either file specifically, so a future store added under a new name doesn't silently fall outside the exclusion.
+
+**The nav-skeleton contract #8-#11 depend on.** `ui/nav/MainScaffold.kt`, `ui/nav/AlbumRoute.kt`, `ui/nav/AlbumSearchResultNavType.kt`, and `res/values/strings.xml` are issue #7's shared shell files — none of the four screen issues should ever need to touch them. Each screen issue owns exactly one placeholder composable and its own strings file:
+
+| Issue | Screen file | Strings file |
+|---|---|---|
+| #8 | `ui/login/LoginScreen.kt` | `res/values/strings_login.xml` |
+| #9 | `ui/search/SearchScreen.kt` | `res/values/strings_search.xml` |
+| #10 | `ui/detail/AlbumDetailScreen.kt` | `res/values/strings_detail.xml` |
+| #11 | `ui/bin/BinScreen.kt` | `res/values/strings_bin.xml` |
+
+`MainScaffold.kt` already threads what each screen needs to reach the shell without editing it: `SearchScreen`/`BinScreen` receive `onAlbumSelected: (AlbumRoute) -> Unit`, and `AlbumDetailScreen` receives both `route: AlbumRoute` and `onBack: () -> Unit` (the same lambda the top bar's own back arrow calls, so a fallback-less deep link and an in-screen "done" action both just work). The top bar itself is destination-aware — a back arrow and a distinct title appear only on the album-detail destination — specifically so #10 never has to add its own back affordance to this shared file. If a screen issue finds itself needing to edit any of the four shared files above, that is a sign the contract needs revisiting, not a one-off exception.
+
+**Forced version pins and workarounds**, each recorded inline where it's declared (`app/build.gradle.kts` / `gradle/libs.versions.toml`) but worth knowing before "helpfully" bumping one:
+
+- **Hilt 2.58, not 2.59+** — the Hilt Gradle plugin requires AGP 9.0 starting at 2.59; this repo pins AGP 8.13.2.
+- **Coil 3.3.0, not 3.5.0** — later Coil 3 module metadata hard-requires `kotlin-stdlib 2.4.0` against this repo's Kotlin 2.2.20.
+- **`hilt { enableAggregatingTask = false }`** in `app/build.gradle.kts` — works around a real Hilt Gradle plugin bug (google/dagger#4976/#4048: `NoSuchMethodError: ClassName.canonicalName()`, a JavaPoet version mismatch on the aggregating task's own worker classpath) reproduced against Hilt 2.58 on this repo's AGP/Gradle combination. The aggregating task exists to discover `@Module`/`@EntryPoint` types published from a *separate* library module's AAR; `:app` is this repo's only Hilt consumer (`:api` can't use Hilt at all), so disabling it costs nothing here. Revisit when Hilt/AGP move past the versions above.
+
 ## Testing
 
 Three tiers, deliberate and plugin-free:
