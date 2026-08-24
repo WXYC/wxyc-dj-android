@@ -7,6 +7,50 @@
          nav_back_content_description stay in strings.xml, not here, because
          they belong to MainScaffold.kt's shell-level top bar, not to this
          screen's own body. -->
-    <string name="album_detail_screen_placeholder">Release details coming soon.</string>
-    <string name="album_detail_back_button_placeholder">Back</string>
+
+    <!-- Catalog section: the shelf source of truth, from /library/info (or,
+         while loading/after a failed load, the fallback row already in hand). -->
+    <string name="album_detail_catalog_section_title">Catalog</string>
+    <string name="album_detail_code_label">Code</string>
+    <string name="album_detail_format_label">Format</string>
+    <string name="album_detail_genre_label">Genre</string>
+    <string name="album_detail_added_label">Added</string>
+    <string name="album_detail_plays_label">Plays</string>
+    <string name="album_detail_streaming_label">Streaming</string>
+    <string name="album_detail_discs_label">Discs</string>
+    <string name="album_detail_streaming_available">Available</string>
+    <string name="album_detail_streaming_library_only">Library only</string>
+    <string name="album_detail_streaming_unknown">Unknown</string>
+
+    <!-- LML-fed sections: release, genres/styles, listen, links, tracklist.
+         Every one of these is best-effort - see album_detail_metadata_unavailable. -->
+    <string name="album_detail_release_section_title">Release</string>
+    <string name="album_detail_year_label">Year</string>
+    <string name="album_detail_label_label">Label</string>
+    <string name="album_detail_released_label">Released</string>
+    <string name="album_detail_tags_section_title">Genres &amp; Styles</string>
+    <string name="album_detail_listen_section_title">Listen</string>
+    <string name="album_detail_links_section_title">Links</string>
+    <string name="album_detail_discogs_link">Discogs</string>
+    <string name="album_detail_wikipedia_link">Wikipedia</string>
+    <string name="album_detail_tracklist_section_title">Tracklist</string>
+
+    <!-- Rotation section: reads the shared RotationPredicate (invariant 14)
+         via AlbumInfo.Rotation.isInRotation() - never re-derived here. -->
+    <string name="album_detail_rotation_section_title">Rotation</string>
+    <string name="album_detail_in_rotation">In rotation</string>
+    <string name="album_detail_kill_date_label">Kill date</string>
+
+    <!-- Add-to-bin action. -->
+    <string name="album_detail_add_to_bin_button">Add to Bin</string>
+    <string name="album_detail_added_to_bin_button">Added to Bin</string>
+
+    <!-- Quiet footer framing - never a red error banner (issue #10's own
+         framing rule). %1$s is the server- or transport-supplied reason. -->
+    <string name="album_detail_note_fallback_row">Showing the search result — some details unavailable.</string>
+    <string name="album_detail_note_unavailable">Album details unavailable right now.</string>
+    <string name="album_detail_metadata_unavailable">Metadata unavailable: %1$s</string>
+    <string name="album_detail_add_error">Couldn\'t add to bin: %1$s</string>
+
+    <string name="album_detail_artwork_content_description">Album artwork</string>
 </resources>
