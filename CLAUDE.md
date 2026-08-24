@@ -47,18 +47,29 @@ That property is what makes a public repo safe here, so protect it:
 
 ## Testing
 
-Two frameworks, one per module — deliberate, and plugin-free:
+Three tiers, deliberate and plugin-free:
 
 - **`:api` on JUnit 5** (`useJUnitPlatform()`), with kotlinx-coroutines-test and MockWebServer. `MockWebServer` is the `StubRequestSession` analogue.
 - **`:app` on JUnit 4**, with Robolectric and Compose UI tests. Compose's `createAndroidComposeRule` is a JUnit4 `TestRule` and Robolectric ships a JUnit4 `Runner`; neither runs on the JUnit 5 platform without `de.mannodermaus.android-junit5`, and adding a plugin to unify them buys less than it costs.
+- **`app/src/androidTest` on a real Android runtime**, JUnit 4 via `androidx.test`, run on a Gradle Managed Device (`./gradlew :app:atdApi30DebugAndroidTest`). This is the tier that exists because the other two *cannot be trusted about the platform* — see below.
 
 Fixtures use WXYC-representative artists — Juana Molina / *DOGA*, Jessica Pratt / *On Your Own Love Again*, Chuquimamani-Condori / *Edits* — from `wxyc-shared/src/test-utils/wxyc-example-data.json`. **Do not** substitute mainstream artists. That file's `canonicalArtistNames` key holds the broader names-only pool, including the diacritic-bearing entries (Aşıq Altay, Csillagrablók, GIDEÖN, Hermanos Gutiérrez, Nilüfer Yanya) that the bin collation test needs.
 
-**One host-vs-device trap to know about:** `java.text.Collator` on Android delegates to `android.icu`; the desktop JVM's does not, and default collation rules are not guaranteed to agree. That is the one place the pure-JVM split can produce false confidence. Set `strength` and `decomposition` explicitly, never defaulted, and back the `:api` ordering test with a Robolectric or instrumented parity test.
+### The instrumented tier, and why it is not optional
+
+**Robolectric cannot answer questions about `java.*`.** Its `SdkSandboxClassLoader` sandboxes only the `android.*` package tree, so a call to `java.text.Collator.getInstance(...)` under a Robolectric runner resolves to the **bootstrap JDK's** `RuleBasedCollator` — the same implementation `:api:test` already exercises. `BinCollationParityTest` was written to check Android's `Collator` and could not. It was green throughout, and `Collator.FULL_DECOMPOSITION` reached `main` behind it: Android's `java.text.Collator` is `android.icu`-backed and its `decompositionMode_Java_ICU(int)` converter throws `IllegalArgumentException` for every mode but `CANONICAL_DECOMPOSITION` and `NO_DECOMPOSITION`, so the first Bin-tab load on any real phone would have crashed. Two host tiers, both green, one guaranteed crash.
+
+So: **a host tier that tests the platform through a shim is evidence about the shim.** When correctness depends on Android runtime behavior — the platform `Collator`, Keystore/Tink, DataStore, the Hilt graph, anything with a `Shadow` — it needs a test in `app/src/androidTest`, not a cleverer Robolectric config. `app/src/androidTest/.../InstrumentedTierTest.kt` is that tier's tripwire (`PureJvmModuleTest`'s counterpart): it asserts `java.vm.name == "Dalvik"`, so any host-JVM-hosted impostor fails rather than quietly passing.
+
+**A second, subtler trap the same incident exposed:** a test that *derives* its expected value from the code under test cannot detect a change to that code. `BinCollationParityTest` reads `strength` and `decomposition` off `BinSorting.newCollator()` to configure its ICU oracle, so mutating `BinSorting` mutates the oracle in lockstep. Measured, not theorized: changing `Collator.PRIMARY` to `Collator.TERTIARY` — which stops "Nilüfer Yanya" and "Nilufer Yanya" filing together, a visible bin defect — leaves **both** host tiers green and is caught only by `BinCollationDeviceTest`. Derive the oracle from a source the mutation cannot reach, or pin the literal.
+
+Set `strength` and `decomposition` explicitly, never defaulted.
 
 ## CI
 
-`.github/workflows/ci.yml` runs three tasks on every PR and every push to `main`:
+`.github/workflows/ci.yml` runs **two jobs** on every PR and every push to `main`, concurrently.
+
+`test-and-lint` is the host tier — run all three locally before pushing, because every push burns CI minutes:
 
 ```bash
 ./gradlew :api:test
@@ -66,7 +77,18 @@ Fixtures use WXYC-representative artists — Juana Molina / *DOGA*, Jessica Prat
 ./gradlew :app:lintDebug
 ```
 
-Run all three locally before pushing — every push burns CI minutes.
+`instrumented` boots a headless API 30 `aosp-atd` emulator and runs `app/src/androidTest`:
+
+```bash
+./gradlew :app:atdApi30DebugAndroidTest
+python3 .github/scripts/assert_instrumented_tests_ran.py
+```
+
+It is a **separate job**, not another step, so unit-test feedback never queues behind an emulator boot. Three things about it are load-bearing:
+
+- **A Gradle Managed Device, not a third-party emulator action.** AGP provisions the image and AVD itself, so the command above is identical locally and in CI — which matters more than usual here, because this tier's failures are exactly the ones a maintainer then has to reproduce by hand. `aosp-atd` is Google's headless UI-stripped test image, published for x86_64 and arm64-v8a alike, so one declaration serves the runner and an Apple-silicon laptop.
+- **API 30 is the floor, and the floor is the point.** The tier's value is catching runtime behavior the host gets wrong, and that divergence is likeliest at the oldest runtime the app supports (minSdk 26; API 30 is as low as the ATD program goes). A second device at the top of the range is the right call once Compose surfaces land and targetSdk-36 behavior changes become the divergence that matters — that is a `create(...)` block in `app/build.gradle.kts` plus a matching CI task name, not a redesign.
+- **The vacuity guard is not ceremony.** With an empty `androidTest` source set AGP skips the task and Gradle reports `BUILD SUCCESSFUL` in under a second, having booted nothing and measured nothing — verified, not assumed. Since `src/test` and `src/androidTest` are one word apart, that is a live way to buy an expensive green light that proves nothing. The guard sums the `tests` attribute across the run's JUnit XML and fails on zero.
 
 `:api:test` is named explicitly rather than folded into `./gradlew check`, so that if it ever stops running that has to be a visible deletion from the workflow rather than a silent consequence of a task-graph change. **`WXYC-Android`'s workflow is `:app`-scoped only**; copying it literally would have left the entire `:api` half — the suites this repo exists to make fast — landing with zero coverage.
 

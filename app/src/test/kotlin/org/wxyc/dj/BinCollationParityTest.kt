@@ -54,17 +54,30 @@ import org.wxyc.dj.api.BinSorting
  * which is exactly what makes this a tripwire for future divergence rather
  * than proof there is none.
  *
- * **What this still does not cover:** the `java.text.Collator` façade
- * `BinSorting.newCollator` actually calls is unreachable under Robolectric
- * (see above), so no test in this repo exercises *that* façade's delegation
- * to `android.icu` — only the two implementations it can bridge to
- * (`RuleBasedCollator` here in `:api:test`, `android.icu.text.Collator` here)
- * independently. `BinEntryTest`'s
+ * **What this still does not cover, and what now does.** The
+ * `java.text.Collator` façade `BinSorting.newCollator` actually calls is
+ * unreachable under Robolectric (see above), so this test reaches only the
+ * two implementations that façade can bridge to (`RuleBasedCollator` in
+ * `:api:test`, `android.icu.text.Collator` here), independently. That gap is
+ * now closed from the other side by `BinCollationDeviceTest` in
+ * `app/src/androidTest`, where the façade *is* the platform's and calling
+ * [BinSorting.sorted] exercises the real delegation. `BinEntryTest`'s
  * `newCollator uses a decomposition mode Android's Collator actually accepts`
- * closes the one gap that combination could still miss (a decomposition
- * value the façade's Java→ICU converter rejects outright) by asserting
- * against the converter's accepted values directly, on the host, with no
- * simulator or Robolectric sandbox needed.
+ * remains the host-side pin for the specific failure that shipped, asserting
+ * against the converter's accepted values directly with no sandbox or
+ * emulator needed.
+ *
+ * **This test's oracle is derived from the code it tests, which bounds what
+ * it can detect.** [javaToIcuStrength]/[javaToIcuDecomposition] translate
+ * whatever [BinSorting.newCollator] is configured with, so a change to that
+ * configuration moves the expectation with it and this suite stays green.
+ * Measured: changing `Collator.PRIMARY` to `Collator.TERTIARY` — which stops
+ * a name's accented and unaccented spellings filing together, a visible bin
+ * defect — leaves both this test and `:api:test` green, and is caught only
+ * on device. Deriving is still the right call *here* (a restated literal
+ * would silently stop matching the thing it mirrors, which is this test's
+ * whole subject), but it means this file is a divergence tripwire, not a
+ * regression pin for the configuration itself.
  *
  * `@Config(sdk = 34)` pins a level that runs under the repo's JDK 17
  * toolchain; Robolectric's SDK 36 shadows require JDK 21.

@@ -88,6 +88,44 @@ android {
         unitTests {
             isIncludeAndroidResources = false
         }
+
+        // Compose's UI-test clock idles on animations; leaving them on is the
+        // standard source of instrumented flake. ATD images ship with no
+        // window animations anyway, so this is here for the day a physical
+        // device or a non-ATD image runs the same suite.
+        animationsDisabled = true
+
+        // A Gradle Managed Device, not a third-party emulator action. AGP
+        // provisions the image and the AVD itself, so `./gradlew
+        // :app:atdApi30DebugAndroidTest` is the same command locally and in
+        // CI — which matters more here than usual, because the entire reason
+        // this tier exists is to reproduce device-only behavior a maintainer
+        // then has to debug.
+        //
+        // `aosp-atd` (Automated Test Device) is the headless, UI-stripped
+        // image Google publishes for exactly this: no Play services, no
+        // launcher apps, materially faster boot. It is published for both
+        // x86_64 and arm64-v8a at API 30-36, so one declaration serves the
+        // ubuntu-latest runner and an Apple-silicon laptop.
+        //
+        // API 30 is the FLOOR the ATD program reaches, and the floor is the
+        // point: this tier's whole value is catching runtime behavior the
+        // desktop JVM and Robolectric get wrong, and that divergence is
+        // likeliest at the oldest runtime the app supports (minSdk 26). It is
+        // deliberately NOT targetSdk 36 — a second device at the top of the
+        // range is the right answer once Compose surfaces land and
+        // targetSdk-36 behavior changes (edge-to-edge, predictive back)
+        // become the divergence that matters, and adding one is a five-line
+        // `create(...)` block plus a matching CI task name.
+        managedDevices {
+            localDevices {
+                create("atdApi30") {
+                    device = "Pixel 6"
+                    apiLevel = 30
+                    systemImageSource = "aosp-atd"
+                }
+            }
+        }
     }
 }
 
@@ -123,4 +161,14 @@ dependencies {
     // delegates to on device, *is* loadable here. BinCollationParityTest
     // builds one directly and checks it against BinSorting's ordering.
     testImplementation(libs.robolectric)
+
+    // The instrumented tier. It exists because Robolectric demonstrably
+    // cannot answer questions about `java.*` platform behavior — its
+    // SdkSandboxClassLoader only sandboxes `android.*` — so a suite that
+    // believes it is testing Android's `java.text.Collator` is in fact
+    // testing the host JDK's. See BinCollationDeviceTest, and
+    // InstrumentedTierTest for the guard that keeps this tier honest.
+    androidTestImplementation(libs.junit4)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
 }
