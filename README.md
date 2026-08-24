@@ -33,7 +33,18 @@ Then:
 ./gradlew :app:lintDebug
 ```
 
-Those three are exactly what CI runs. Run them before pushing.
+Those three are the host tier, and they are what you run before every push.
+
+There is a fourth, on a real Android runtime, because the host tier cannot answer questions about the platform — Robolectric sandboxes only `android.*`, so a suite that believes it is testing Android's `java.text.Collator` is testing the desktop JDK's:
+
+```bash
+./gradlew :app:atdApi30DebugAndroidTest   # boots a headless API 30 emulator
+python3 .github/scripts/assert_instrumented_tests_ran.py
+```
+
+Gradle provisions the emulator itself, so that is the same command CI runs. The first run downloads a ~500 MB system image and needs its license accepted once (`sdkmanager --licenses`, from `cmdline-tools`); afterwards it is a couple of minutes. The second command is not optional ceremony: with an empty `androidTest` source set the Gradle task reports `BUILD SUCCESSFUL` in under a second having measured nothing, so the guard is what makes the green mean something.
+
+Run the instrumented tier when you touch `:app`, anything platform-backed, or anything the host tier can only test through a shim. CI runs it on every PR regardless.
 
 ## Releasing
 
