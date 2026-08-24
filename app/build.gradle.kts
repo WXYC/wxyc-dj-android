@@ -4,6 +4,16 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    // Issue #7: the nav skeleton's routes (AlbumRoute, SearchRoute, BinRoute)
+    // are @Serializable data types consumed by Navigation Compose's
+    // type-safe routing — the compiler plugin generates their KSerializers.
+    // Applied directly here rather than declared "apply false" in the root
+    // build file, matching :api's existing precedent for this same plugin.
+    alias(libs.plugins.kotlin.serialization)
+    // KSP, not kapt (issue #7's explicit requirement) -- WXYC-Android is
+    // still on kapt; this repo starts clean on the successor.
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.hilt.android)
 }
 
 // Release signing is configured from a `keystore.properties` that is gitignored
@@ -138,6 +148,20 @@ android {
     }
 }
 
+// Works around a real Hilt Gradle plugin bug (google/dagger#4976, #4048): its
+// opt-in cross-module "aggregating task" (:app:hiltAggregateDepsDebug) fails
+// with `NoSuchMethodError: ClassName.canonicalName()` -- a JavaPoet version
+// mismatch on that task's own worker classpath, reproduced against Hilt 2.58
+// (the newest release whose Gradle plugin still supports AGP 8.x -- 2.59+
+// requires AGP 9) on this repo's AGP 8.13.2 + Gradle 9.0 combination. The
+// aggregating task exists to discover @Module/@EntryPoint types published
+// from a *separate* library module's AAR; this repo has exactly one Hilt
+// consumer (:app itself -- :api is a pure JVM module that can't use Hilt at
+// all, per this repo's CLAUDE.md), so disabling it costs nothing here.
+hilt {
+    enableAggregatingTask = false
+}
+
 // Pin the JDK Gradle compiles and runs tests on, not just the bytecode level:
 // compileOptions governs -target, while unit tests run on the daemon's JDK — a
 // machine with a newer JAVA_HOME otherwise diverges from CI's Temurin 17.
@@ -150,6 +174,11 @@ dependencies {
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.ktx)
+    // Backs collectAsStateWithLifecycle() -- the repo-wide convention
+    // (CLAUDE.md: "StateFlow + collectAsStateWithLifecycle (never
+    // LiveData)") for observing AuthService.state from AuthGate.
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
 
     implementation(platform(libs.compose.bom))
@@ -157,6 +186,34 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
+
+    // Issue #7: navigation skeleton (type-safe @Serializable routes).
+    implementation(libs.androidx.navigation.compose)
+    // AlbumSearchResultNavType round-trips AlbumRoute's fallback through
+    // :api's WxycJson codec directly -- :api keeps kotlinx-serialization-json
+    // as `implementation` (deliberately not exported, see api/build.gradle.kts),
+    // so :app needs its own copy on the compile classpath to reference the
+    // Json type at all, not just to build this module.
+    implementation(libs.kotlinx.serialization.json)
+
+    // Issue #7: Hilt graph, KSP not kapt.
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.android.compiler)
+    implementation(libs.androidx.hilt.navigation.compose)
+
+    // Issue #7: encrypted token storage -- DataStore holds the ciphertext,
+    // Tink (over a Keystore-wrapped master key) does the encrypting. See
+    // token/EncryptedTokenStorage.kt for why not EncryptedSharedPreferences.
+    implementation(libs.androidx.datastore.preferences)
+    implementation(libs.tink.android)
+
+    // Issue #7: Coil's ImageLoader must be built over CookielessHttpClient
+    // (di/NetworkModule.kt) rather than a default OkHttpClient Coil would
+    // otherwise construct itself -- see CookielessHttpClient's KDoc on why a
+    // second, cookie-armed client anywhere in the app is a real regression
+    // risk once cover art is proxied through api.wxyc.org.
+    implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
 
     testImplementation(libs.junit4)
     // The one place the pure-JVM :api/:app split can produce false confidence

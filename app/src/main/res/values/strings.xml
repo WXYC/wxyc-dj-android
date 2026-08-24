@@ -1,4 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">WXYC DJ</string>
+
+    <!-- Issue #7: auth gate + nav skeleton. The screen-body strings below are
+         placeholders; issues #8-#11 replace each placeholder composable's
+         body without needing to touch this file's other entries. -->
+    <string name="sign_out">Sign out</string>
+    <string name="tab_search_label">Search</string>
+    <string name="tab_bin_label">Bin</string>
+    <string name="tab_search_icon">🔍</string>
+    <string name="tab_bin_icon">📁</string>
+    <string name="login_screen_placeholder">Sign in with your dj.wxyc.org credentials to continue.</string>
+    <string name="search_screen_placeholder">Search coming soon.</string>
+    <string name="bin_screen_placeholder">Bin coming soon.</string>
+    <string name="album_detail_screen_placeholder">Release details coming soon.</string>
 </resources>
