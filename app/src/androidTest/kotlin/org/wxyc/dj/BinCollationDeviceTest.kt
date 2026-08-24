@@ -39,10 +39,17 @@ import org.wxyc.dj.api.BinSorting
  * hands the ordering decision to the secondary key. It does **not** prove
  * Android's ICU tables and the host JDK's `RuleBasedCollator` agree on any
  * other ordering question; on this pool they do, which is what makes it a
- * tripwire for future divergence rather than proof there is none. The
- * decomposition cases are the ones that can only be satisfied on a runtime
- * whose `Collator` behaves like Android's, and [InstrumentedTierTest]
- * independently pins that this is one.
+ * tripwire for future divergence rather than proof there is none.
+ *
+ * **Exactly one case here is device-only**, and it is worth naming precisely
+ * rather than letting the suite's location imply it of all four:
+ * [theRealCollatorFacadeRejectsFullDecomposition], which the host JDK fails
+ * because `RuleBasedCollator` accepts `FULL_DECOMPOSITION` happily. The other
+ * three assert things a correctly-configured host collator also satisfies —
+ * they earn their place by asserting them against the *real* façade, and by
+ * being the backstop if the host pins in `BinEntryTest` are ever weakened,
+ * not by being unreachable elsewhere. [InstrumentedTierTest] independently
+ * pins that this is a real Android runtime.
  */
 @RunWith(AndroidJUnit4::class)
 class BinCollationDeviceTest {
@@ -73,11 +80,21 @@ class BinCollationDeviceTest {
     }
 
     @Test
-    fun aDecomposedSpellingCollatesEqualToItsPrecomposedForm() {
+    fun bothUnicodeFormsOfANameFileAsOne() {
         // The wire can carry either Unicode form for the same visual name, and
         // BinSorting exists so both file in one place. Asserted against the
         // configured collator rather than against `equals`, which they are
         // not: these two strings differ by a code point.
+        //
+        // Scope, measured rather than assumed: this holds for every
+        // strength/decomposition pair BinSorting could plausibly use, and for
+        // an unconfigured collator too — ICU and the JDK both map a
+        // precomposed character to the same collation elements as its
+        // decomposition, so canonical equivalence folds regardless of the
+        // decomposition knob. It therefore pins the REQUIREMENT (either form
+        // files in one place) and not the configuration that delivers it; the
+        // configuration is pinned by the two cases above and by BinEntryTest.
+        // Do not read a green here as evidence that `decomposition` is set.
         val precomposed = "Nil\u00FCfer Yanya"
         val decomposed = "Nilu\u0308fer Yanya"
 
