@@ -6,6 +6,8 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.Call
@@ -28,24 +30,203 @@ private fun epochSecondsToInstant(seconds: Double): Instant =
 private val persistedPayloadJson = Json { ignoreUnknownKeys = true }
 
 /**
+ * The single home of every read and write to [AuthService]'s session
+ * identity: the session token, the cached JWT, and the session-*generation*
+ * epoch (issue #16). Nothing outside this class ever touches those three
+ * values directly — every access is one of the methods below, and every one
+ * of them is a `synchronized` block on [lock]: a plain JVM monitor, not
+ * [kotlinx.coroutines.sync.Mutex].
+ *
+ * That choice is deliberate, not incidental, and it resolves two separate
+ * traps in one move:
+ *
+ * **Reentrancy.** [AuthService.currentJwt] calls [AuthService.refreshJwt],
+ * and [kotlinx.coroutines.sync.Mutex] is explicitly *not* reentrant — a
+ * `withLock` acquired around the whole of one and held into a `withLock`
+ * around the whole of the other would deadlock the very first time a lazy
+ * refresh ran. This class never has that shape: no method here calls
+ * another method here while still holding the lock, and no method here is
+ * ever held open across [AuthService.refreshJwt]'s network await (that
+ * await happens entirely *between* two independent, short-lived lock
+ * acquisitions — see [readForRefresh] and [commitRefresh]). A JVM monitor
+ * is reentrant by construction, so even if some future change did nest two
+ * calls on the same thread, it would nest safely rather than deadlock —
+ * but the actual design here needs no reentrancy at all, because nothing
+ * suspends while the lock is held.
+ *
+ * **Visibility.** A `synchronized` block does more than serialize access:
+ * per JLS 17.4.5, releasing a monitor happens-before a later thread
+ * acquiring the *same* monitor. That is the specific guarantee the old,
+ * lock-free field design lacked and issue #16 is about: a coroutine
+ * resuming on one dispatcher thread after [AuthService.refreshJwt]'s
+ * network await is not otherwise guaranteed to observe a [clear] a
+ * *different* thread completed while that await was in flight, and could
+ * silently act on a stale epoch. Every method below both reads and, where
+ * relevant, decides-and-writes inside one critical section, so a
+ * check-then-act guard (the epoch check, the token-identity check) can
+ * never be split across a window another thread's mutation lands in.
+ * [InMemoryTokenStorage] guards its backing map with the identical pattern
+ * for the identical reason.
+ *
+ * None of this requires [AuthService] to run on a confined dispatcher any
+ * more — see its class doc.
+ */
+private class SessionState {
+    private val lock = Any()
+    private var sessionToken: String? = null
+    private var cachedJwt: Pair<String, JwtPayload>? = null
+
+    /**
+     * Monotonic session-*generation* counter (invariant 3, iOS issue #66).
+     * Bumped by [clear], [clearIfTokenMatches] (when it actually clears),
+     * and [beginSession] — never by a `set-auth-token` rotation, which
+     * re-issues the bearer *within* the same generation. [readForRefresh]
+     * captures it before [AuthService.refreshJwt] awaits `/auth/token`,
+     * and [commitRefresh] re-checks it — atomically, alongside the write it
+     * gates — after that await returns, so a sign-out (or re-sign-in)
+     * landing during an in-flight refresh can't be resurrected by the
+     * success path re-persisting a stale rotation/JWT. Rotation
+     * deliberately keeps the same generation, so a benign overlapping
+     * double-refresh — where only the bearer rotated — still resolves a
+     * JWT for both callers.
+     */
+    private var sessionEpoch: Long = 0L
+
+    /** [token] and [epoch] read together as one consistent generation snapshot. */
+    data class TokenAndEpoch(val token: String, val epoch: Long)
+
+    fun currentToken(): String? = synchronized(lock) { sessionToken }
+
+    fun latestJwt(): String? = synchronized(lock) { cachedJwt?.first }
+
+    /** The cached JWT if it has more than [leeway] left before expiry as of [now], else `null`. */
+    fun freshJwt(now: Instant, leeway: Duration): String? = synchronized(lock) {
+        cachedJwt?.takeIf { (_, payload) -> Duration.between(now, payload.expiration) > leeway }?.first
+    }
+
+    /** The (token, epoch) snapshot [AuthService.refreshJwt] needs before its network await, or `null` when signed out. */
+    fun readForRefresh(): TokenAndEpoch? = synchronized(lock) {
+        sessionToken?.let { TokenAndEpoch(it, sessionEpoch) }
+    }
+
+    /** Install a token without touching the generation — the initial read in [AuthService.restoreSession]. */
+    fun installToken(token: String) = synchronized(lock) {
+        sessionToken = token
+    }
+
+    /** Install a brand-new session token AND bump the generation (issue #66 invariant 3) — a sign-in, not a restore. */
+    fun beginSession(token: String) = synchronized(lock) {
+        sessionToken = token
+        sessionEpoch++
+    }
+
+    fun invalidateJwt() = synchronized(lock) {
+        cachedJwt = null
+    }
+
+    /** Forget everything and bump the generation, so a stale in-flight refresh's [commitRefresh] can detect it. */
+    fun clear() = synchronized(lock) {
+        sessionToken = null
+        cachedJwt = null
+        sessionEpoch++
+    }
+
+    /**
+     * [clear], but only if the current token still equals [expected] — the
+     * issue-#53 token-identity guard behind [AuthService.currentJwt]'s 401
+     * demotion. Checking and clearing as one atomic step is what stops a
+     * concurrent re-sign-in's (or rotation's) token from being clobbered by
+     * a 401 that was actually for a *different*, already-superseded bearer.
+     * Returns whether it cleared.
+     */
+    fun clearIfTokenMatches(expected: String): Boolean = synchronized(lock) {
+        if (sessionToken != expected) return@synchronized false
+        sessionToken = null
+        cachedJwt = null
+        sessionEpoch++
+        true
+    }
+
+    /**
+     * The atomic commit at the tail of [AuthService.refreshJwt] (invariant
+     * 3, iOS issue #66): applies [rotatedToken] (if the server rotated the
+     * bearer) and/or [freshJwt] (if the JWT decoded) in one step, checked
+     * against [epochAtRefresh] — the generation captured by [readForRefresh]
+     * before the network await. Returns `false`, applying **neither**
+     * mutation, when the generation has moved: a [clear],
+     * [clearIfTokenMatches], or [beginSession] landed on another thread
+     * while the network call was in flight, and the whole refresh must be
+     * treated as stale. This is the fix issue #16 is about: with the check
+     * and the write as two separate steps, a concurrent clear landing in
+     * the gap between them was silently undone by a refresh that had
+     * already validated *before* the clear happened.
+     *
+     * This method only ever moves in-memory state. [AuthService.refreshJwt]
+     * additionally holds [AuthService.sessionMutex] for the duration of
+     * this call *and* every storage write it authorizes — see that field's
+     * KDoc for why the in-memory guard alone is not sufficient once a
+     * persisted copy is involved.
+     */
+    fun commitRefresh(epochAtRefresh: Long, rotatedToken: String?, freshJwt: Pair<String, JwtPayload>?): Boolean =
+        synchronized(lock) {
+            if (sessionEpoch != epochAtRefresh) return@synchronized false
+            if (rotatedToken != null) sessionToken = rotatedToken
+            if (freshJwt != null) cachedJwt = freshJwt
+            true
+        }
+}
+
+/**
  * Owns the better-auth session lifecycle for a single signed-in DJ: takes an
  * identifier + password, calls whichever sign-in route the identifier
  * belongs to ([SignInIdentifier] picks `/auth/sign-in/email` or
  * `/auth/sign-in/username`), exchanges the session for a short-lived JWT via
  * `GET /auth/token`, and refreshes the JWT before it expires.
  *
- * **Concurrency contract**: this class holds mutable state ([sessionToken],
- * [cachedJwt], [sessionEpoch], [state]) with no internal lock. It mirrors
- * iOS's `@MainActor`-isolated `AuthService` — correct only when every call
- * is made from a single confined coroutine dispatcher (e.g. a ViewModel's
- * `viewModelScope`, backed by `Dispatchers.Main.immediate`), so that two
- * concurrent callers interleave *only* at suspension points (an awaited
- * network call), never mid-mutation. That is exactly the interleaving
- * [refreshJwt]'s session-epoch guard and [currentJwt]'s token-identity guard
- * exist for: without single-dispatcher confinement those guards would not
- * be sufficient on their own, and with it a lock would be redundant. `:api`
- * test suites reproduce the same confinement with a single [kotlinx.coroutines.test.TestDispatcher]
- * via `runTest`.
+ * **Concurrency contract (issue #16).** Every public method here is safe to
+ * call from any number of coroutines on any dispatchers, including
+ * genuinely parallel ones — a ViewModel on `Dispatchers.Main.immediate`
+ * racing a `withContext(Dispatchers.IO) { apiClient.searchLibrary(...) }`
+ * call that lazily refreshes the JWT, for instance. An earlier version of
+ * this class's KDoc claimed the opposite: that it was correct only under
+ * single-confined-dispatcher discipline, mirroring iOS's `@MainActor`. That
+ * claim held only by accident — it was true of the one caller that existed
+ * at the time ([kotlinx.coroutines.test.TestDispatcher] in tests, a
+ * ViewModel's `Dispatchers.Main.immediate` in the app) — and stopped being
+ * true the moment a second, genuinely parallel dispatcher could reach this
+ * class. Read that as *safety* — no interleaving can corrupt the session or
+ * resurrect a cleared one — and not as idempotence: [restoreSession]'s
+ * `state != Unknown` early-out is a plain read-then-act, so two genuinely
+ * concurrent cold-launch restores would each spend a `/auth/token`
+ * exchange and each settle on the same answer. That is wasteful rather
+ * than wrong, and there is one call site, so it is left as-is deliberately
+ * rather than overlooked.
+ *
+ * What actually holds the invariant now is two layers, one for each
+ * kind of state this class touches:
+ *
+ * - **In-memory session identity** — the session token, the cached JWT, the
+ *   session-generation epoch — lives in [SessionState], not as bare fields
+ *   here. Every read, write, or check-then-act on them goes through one of
+ *   its `synchronized` methods; see that class's KDoc for exactly how that
+ *   closes the gap, and how it avoids [kotlinx.coroutines.sync.Mutex]'s
+ *   non-reentrancy given [currentJwt] calls [refreshJwt].
+ * - **The memory-plus-storage compound transactions** — "commit a refresh
+ *   in memory, *then* persist it", "clear the session in memory, *then*
+ *   wipe storage" — additionally go through [sessionMutex]. A
+ *   [SessionState] commit and its own [tokenStorage] write are two
+ *   independent suspending operations with no ordering relationship of
+ *   their own; without [sessionMutex] serializing the whole pair, a
+ *   refresh whose in-memory commit legitimately won a race against a
+ *   concurrent clear could still have its *storage* write reordered to
+ *   land after that clear's storage wipe (measured while building the
+ *   issue-#16 regression suite, in
+ *   [AuthServiceConcurrencyTest] — a real, reproducible gap distinct from,
+ *   and narrower than, the in-memory race the issue itself describes).
+ *   [sessionMutex] is never held across [refreshJwt]'s network await and no
+ *   guarded block ever calls into another one, so — exactly like
+ *   [SessionState]'s monitor — nothing here needs [Mutex]'s reentrancy
+ *   either.
  *
  * The central design fact — the session token is the credential, the JWT is
  * a derived, re-mintable artifact — is what makes sign-in and restore each
@@ -73,23 +254,20 @@ class AuthService(
     /** Whether a DJ is currently signed in. */
     val isSignedIn: Boolean get() = state.value.isSignedIn
 
-    private var sessionToken: String? = null
-    private var cachedJwt: Pair<String, JwtPayload>? = null
+    /** See [SessionState]'s KDoc: the sole owner of the session token, the cached JWT, and the session-generation epoch. */
+    private val sessionState = SessionState()
 
     /**
-     * Monotonic session-*generation* counter (invariant 3, iOS issue #66).
-     * Bumped whenever the session is cleared ([clearLocalSession]) or a
-     * brand-new one is established ([completeSignIn]'s leg 1), but **not**
-     * on a `set-auth-token` rotation, which re-issues the bearer *within*
-     * the same generation. [refreshJwt] captures it before awaiting
-     * `/auth/token` and re-checks it after, so a sign-out (or re-sign-in)
-     * landing during an in-flight refresh can't be resurrected by the
-     * success path re-persisting a stale rotation/JWT. Rotation
-     * deliberately keeps the same generation, so a benign overlapping
-     * double-refresh — where only the bearer rotated — still resolves a
-     * JWT for both callers.
+     * Serializes each "mutate [sessionState], then persist to
+     * [tokenStorage]" compound transaction against every other one — see
+     * the class KDoc's second bullet. Never held across a suspending
+     * network call, and no block guarded by it ever enters another one, so
+     * it needs no reentrancy: [completeSignIn]'s leg-1 commit-and-persist,
+     * [refreshJwt]'s commit-and-persist, [clearLocalSession], and
+     * [currentJwt]'s token-identity clear-and-persist each acquire and
+     * release it once, never nested inside each other.
      */
-    private var sessionEpoch: Long = 0L
+    private val sessionMutex = Mutex()
 
     suspend fun restoreSession() {
         if (_state.value != AuthState.Unknown) return
@@ -106,7 +284,7 @@ class AuthService(
             _state.value = AuthState.SignedOut
             return
         }
-        sessionToken = stored
+        sessionState.installToken(stored)
         try {
             val payload = refreshJwt()
             _state.value = AuthState.SignedIn(payload)
@@ -127,7 +305,7 @@ class AuthService(
             // never clears them, so a later online launch can still recover
             // the session (success) or terminally clear it (401).
             val decision = OfflineSessionPolicy.decide(
-                hasStoredSession = sessionToken != null,
+                hasStoredSession = sessionState.currentToken() != null,
                 cachedPayload = loadPersistedPayload(),
                 lastValidatedAtEpochSeconds = loadLastValidatedAt(),
                 nowEpochSeconds = epochSeconds(clock()),
@@ -180,9 +358,10 @@ class AuthService(
         val token: String
         try {
             token = establishing()
-            tokenStorage.save(token, TokenSlot.SESSION_TOKEN)
-            sessionToken = token
-            sessionEpoch++
+            sessionMutex.withLock {
+                tokenStorage.save(token, TokenSlot.SESSION_TOKEN)
+                sessionState.beginSession(token)
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: AuthError) {
@@ -318,7 +497,7 @@ class AuthService(
     }
 
     suspend fun signOut() {
-        sessionToken?.let { token -> bestEffort { wire.signOut(token) } }
+        sessionState.currentToken()?.let { token -> bestEffort { wire.signOut(token) } }
         clearLocalSession()
         _state.value = AuthState.SignedOut
         _lastError.value = null
@@ -333,26 +512,29 @@ class AuthService(
      *
      * A 401 here demotes to [AuthState.SignedOut] — **but only if the
      * rejected bearer is still the current session token** (invariant 4,
-     * iOS issue #53's token-identity guard). Two callers can share this
+     * iOS issue #53's token-identity guard, enforced atomically by
+     * [SessionState.clearIfTokenMatches]). Two callers can share this
      * service and overlap a refresh, each bound to its own bearer at the
      * top of the call; if a concurrent re-sign-in (or a rotation captured
-     * by the other in-flight refresh) replaced [sessionToken] while this
+     * by the other in-flight refresh) replaced the session token while this
      * one awaited, the 401 is for a superseded bearer, and clobbering would
      * erase a valid new session. Report this stale attempt as
      * unauthenticated instead and let the caller retry the live session.
      */
     suspend fun currentJwt(): String {
-        cachedJwt?.let { (token, payload) ->
-            if (Duration.between(clock(), payload.expiration) > REFRESH_LEEWAY) return token
-        }
-        val tokenAtRefresh = sessionToken ?: throw AuthError.NotSignedIn
+        sessionState.freshJwt(clock(), REFRESH_LEEWAY)?.let { return it }
+        val tokenAtRefresh = sessionState.currentToken() ?: throw AuthError.NotSignedIn
         try {
             refreshJwt()
         } catch (e: CancellationException) {
             throw e
         } catch (e: AuthError.NotSignedIn) {
-            if (sessionToken == tokenAtRefresh) {
-                clearLocalSession()
+            val cleared = sessionMutex.withLock {
+                sessionState.clearIfTokenMatches(tokenAtRefresh).also { didClear ->
+                    if (didClear) bestEffort { tokenStorage.clearAll() }
+                }
+            }
+            if (cleared) {
                 _lastError.value = AuthError.NotSignedIn
                 _state.value = AuthState.SignedOut
             }
@@ -360,12 +542,32 @@ class AuthService(
         }
         // A transient throw above propagates unchanged: state stays
         // signed-in and the caller sees its normal retryable error.
-        return cachedJwt?.first ?: throw AuthError.NotSignedIn
+        return sessionState.latestJwt() ?: throw AuthError.NotSignedIn
     }
 
+    /**
+     * Drops the cached JWT so the next [currentJwt] re-mints one — what
+     * `ApiClient` calls on a 401 before its single retry.
+     *
+     * Guarded by [sessionMutex] like every other memory-plus-storage
+     * compound here, and deliberately so even though its storage half is
+     * currently unobservable: [TokenSlot.JWT] is written and cleared but
+     * **never loaded back** (a cold launch re-mints via [restoreSession] →
+     * [refreshJwt]), so today an interleaving that left storage and memory
+     * disagreeing about the JWT would have no visible effect. The rule is
+     * uniform anyway, for two reasons: this method has exactly the
+     * mutate-then-persist shape whose *unserialized* form was the narrower
+     * second gap found while building the issue-#16 suite, and a future
+     * reader of that slot — an offline path reusing a still-valid JWT, say,
+     * next to the issue-#57 grace window — would turn a benign divergence
+     * into a real one with nothing here to flag it. One exempt method is
+     * also how the class KDoc's rule stops being true.
+     */
     suspend fun invalidateJwt() {
-        cachedJwt = null
-        bestEffort { tokenStorage.clear(TokenSlot.JWT) }
+        sessionMutex.withLock {
+            sessionState.invalidateJwt()
+            bestEffort { tokenStorage.clear(TokenSlot.JWT) }
+        }
     }
 
     /** Drop the last sign-in error without touching the session. */
@@ -404,14 +606,40 @@ class AuthService(
         }
     }
 
+    /**
+     * Fetches a fresh JWT for the current session and reconciles the result
+     * against [sessionState] and [tokenStorage] as one atomic transaction
+     * (see [SessionState.commitRefresh] and [sessionMutex]).
+     *
+     * The read of (token, epoch) and the eventual commit-and-persist are
+     * two *independent* short lock acquisitions with the suspending network
+     * call in between — never one critical section spanning the await,
+     * which is exactly what would make [currentJwt] calling this function
+     * deadlock-prone under a non-reentrant lock. JWT decoding happens
+     * between those two points too, deliberately outside any lock: it
+     * touches no shared state, so there is nothing to protect, and it must
+     * still run — and its result must still be committable — even when a
+     * `set-auth-token` rotation arrived with no usable JWT body (see the
+     * throws below, which fire only *after* the transaction, so a rotated
+     * bearer survives an undecodable JWT exactly as before).
+     */
     private suspend fun refreshJwt(): JwtPayload {
-        val token = sessionToken ?: throw AuthError.NotSignedIn
-        val epochAtRefresh = sessionEpoch
+        val (token, epochAtRefresh) = sessionState.readForRefresh() ?: throw AuthError.NotSignedIn
         val exchange = wire.fetchToken(token)
         if (exchange.statusCode !in 200..299) {
             if (exchange.statusCode == 401) throw AuthError.NotSignedIn
             throw AuthError.ServerFailure(exchange.statusCode, serverMessage = null)
         }
+
+        val jwtToken = exchange.jwtToken
+        val payload = jwtToken?.let { raw ->
+            try {
+                JwtDecoder.decode(raw)
+            } catch (e: JwtDecodeError) {
+                null
+            }
+        }
+
         // Bail before persisting anything if the session was cleared or
         // replaced (signOut / re-sign-in) while this awaited (invariant 3).
         // Otherwise this 2xx resurrects a torn-down session: the rotated
@@ -420,25 +648,42 @@ class AuthService(
         // the next cold launch silently signs back in. A rotation captured
         // by a concurrent refresh keeps the same generation, so a benign
         // overlapping double-refresh still persists for both callers.
-        if (sessionEpoch != epochAtRefresh) throw AuthError.NotSignedIn
-        exchange.rotatedSessionToken?.let { rotated ->
-            sessionToken = rotated
-            bestEffort { tokenStorage.save(rotated, TokenSlot.SESSION_TOKEN) }
+        //
+        // The in-memory commit AND every storage write it authorizes run
+        // inside the SAME [sessionMutex] critical section as
+        // [clearLocalSession]'s clear-and-wipe: without that, the commit
+        // above could legitimately win (epoch still matched at the instant
+        // it ran) and then have its OWN storage write reordered, by
+        // ordinary scheduling, to land after a concurrent clear's storage
+        // wipe — resurrecting the session in storage even though memory
+        // ended up correctly cleared. See the class KDoc's second bullet.
+        val applied = sessionMutex.withLock {
+            val committed = sessionState.commitRefresh(
+                epochAtRefresh = epochAtRefresh,
+                rotatedToken = exchange.rotatedSessionToken,
+                freshJwt = if (jwtToken != null && payload != null) jwtToken to payload else null,
+            )
+            if (committed) {
+                exchange.rotatedSessionToken?.let { rotated ->
+                    bestEffort { tokenStorage.save(rotated, TokenSlot.SESSION_TOKEN) }
+                }
+                if (jwtToken != null && payload != null) {
+                    bestEffort { tokenStorage.save(jwtToken, TokenSlot.JWT) }
+                    // A successful exchange is a confirmed server contact:
+                    // reset the offline grace window and refresh the
+                    // durable payload (issue #57). This is the single
+                    // chokepoint for sign-in, cold-launch restore, and the
+                    // lazy refresh — every path that proves the session is
+                    // live flows here.
+                    persistValidationAnchors(payload)
+                }
+            }
+            committed
         }
-        val jwtToken = exchange.jwtToken ?: throw AuthError.NetworkFailure("undecodable /auth/token body")
-        val payload = try {
-            JwtDecoder.decode(jwtToken)
-        } catch (e: JwtDecodeError) {
-            throw AuthError.NetworkFailure("undecodable JWT payload")
-        }
-        cachedJwt = jwtToken to payload
-        bestEffort { tokenStorage.save(jwtToken, TokenSlot.JWT) }
-        // A successful exchange is a confirmed server contact: reset the
-        // offline grace window and refresh the durable payload (issue #57).
-        // This is the single chokepoint for sign-in, cold-launch restore,
-        // and the lazy refresh — every path that proves the session is
-        // live flows here.
-        persistValidationAnchors(payload)
+        if (!applied) throw AuthError.NotSignedIn
+
+        if (jwtToken == null) throw AuthError.NetworkFailure("undecodable /auth/token body")
+        if (payload == null) throw AuthError.NetworkFailure("undecodable JWT payload")
         return payload
     }
 
@@ -453,10 +698,10 @@ class AuthService(
      * previously-good token so it can retry.
      */
     private suspend fun clearLocalSession() {
-        sessionToken = null
-        cachedJwt = null
-        sessionEpoch++
-        bestEffort { tokenStorage.clearAll() }
+        sessionMutex.withLock {
+            sessionState.clear()
+            bestEffort { tokenStorage.clearAll() }
+        }
     }
 
     private suspend fun persistValidationAnchors(payload: JwtPayload) {
