@@ -117,6 +117,15 @@ android {
         // targetSdk-36 behavior changes (edge-to-edge, predictive back)
         // become the divergence that matters, and adding one is a five-line
         // `create(...)` block plus a matching CI task name.
+        //
+        // `testedAbi` is deliberately left unset, with a dated caveat: AGP
+        // warns that it presently defaults to "x86" and that AGP 9.0 will
+        // change that default to "arm64-v8a". Today's default is what the
+        // ubuntu runner needs (it resolves the API 30 ATD x86 image and runs),
+        // and pinning "x86" here would break this device on an Apple-silicon
+        // laptop, which is half the point of choosing an image published for
+        // both. Revisit on the AGP 9 upgrade — API 31+ ATD publishes no 32-bit
+        // x86 at all, so moving the floor up is the likely resolution.
         managedDevices {
             localDevices {
                 create("atdApi30") {
