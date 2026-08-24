@@ -36,6 +36,7 @@ import org.wxyc.dj.api.CookielessHttpClientFactory
 import org.wxyc.dj.api.InMemoryTokenStorage
 import org.wxyc.dj.api.isSignedIn
 import org.wxyc.dj.api.LoginCodeDestination
+import org.wxyc.dj.testing.MainDispatcherRule
 
 /**
  * Pins [LoginViewModel]: the three-stage machine and its error-clearing on

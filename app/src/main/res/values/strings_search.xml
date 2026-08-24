@@ -1,8 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Owned by issue #9 (ui/search/SearchScreen.kt). Split out of
-         strings.xml by issue #7's review so #9 never has to add entries to a
-         file the other three screen issues (#8, #10, #11) also touch — see
-         strings.xml's own comment. -->
-    <string name="search_screen_placeholder">Search coming soon.</string>
+    <!-- Owned by issue #9 (ui/search/SearchScreen.kt, SearchResultRow.kt,
+         TrackMatchBadge.kt). Split out of strings.xml by issue #7's review
+         so #9 never has to add entries to a file the other three screen
+         issues (#8, #10, #11) also touch — see strings.xml's own comment.
+         search_screen_placeholder is retired: this screen now has a real
+         body. -->
+    <string name="search_field_placeholder">Artist or album</string>
+
+    <string name="search_idle_title">Search the library</string>
+    <string name="search_idle_description">Type at least two characters.</string>
+    <string name="search_searching_label">Searching…</string>
+    <string name="search_empty_title">No results</string>
+    <!-- %1$s is the raw (untrimmed) text in the search field. -->
+    <string name="search_empty_description">No matches for “%1$s”.</string>
+
+    <string name="search_add_to_bin_description">Add to bin</string>
+    <string name="search_add_to_bin_added_description">Added to bin</string>
+    <string name="search_add_to_bin_retry_description">Adding to bin failed. Tap to retry.</string>
+
+    <!-- TrackMatchBadge.kt's trackMatchSummary formats one of these two —
+         %1$s is the matched track title, %2$d (multiple only) is the count
+         of additional hints beyond the first. -->
+    <string name="search_track_match_single">via track: %1$s</string>
+    <string name="search_track_match_multiple">via track: %1$s (+%2$d more)</string>
 </resources>
