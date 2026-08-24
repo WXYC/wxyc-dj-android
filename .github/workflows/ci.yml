@@ -29,7 +29,7 @@ jobs:
           java-version: '17'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       # :api:test is named explicitly rather than relying on `check`, because
       # this repo's whole structural bet is that the :api suites run on the host
@@ -87,7 +87,7 @@ jobs:
           java-version: '17'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
 
       # ubuntu-latest exposes /dev/kvm but not to the unprivileged runner user,
       # and without hardware acceleration the emulator is too slow to finish
