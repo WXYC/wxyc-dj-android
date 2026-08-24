@@ -113,11 +113,21 @@ jobs:
       # Only the system image, deliberately not the AVD: the image is a large
       # immutable download worth carrying between runs, while a cached AVD
       # carries lock files and snapshots whose staleness is its own flake
-      # source. Recreating the AVD from a warm image is seconds. Bump the key's
-      # suffix when the managed device in app/build.gradle.kts changes, or the
-      # cache will serve an image for the previous API level forever.
-      - name: Cache the ATD system image
-        uses: actions/cache@v4
+      # source. Recreating the AVD from a warm image is seconds.
+      #
+      # Split restore/save rather than `actions/cache`, so the save can be
+      # gated on success. The combined action saves in its post step even when
+      # the job FAILED, which under a static key would let a run that died
+      # mid-provisioning freeze a half-installed image into the only key this
+      # workflow ever reads — and sdkmanager treats any directory carrying a
+      # package.xml as installed, so the job would stay wedged until someone
+      # hand-edited the key. Bump the key's suffix when the managed device in
+      # app/build.gradle.kts changes; a stale entry is restored alongside, not
+      # instead of, the new package, so the cost of forgetting is a
+      # re-download every run rather than a wrong image.
+      - name: Restore the ATD system image
+        id: restore-system-image
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.ANDROID_SYSTEM_IMAGES }}
           key: android-system-image-aosp_atd-30-${{ runner.os }}
@@ -126,9 +136,18 @@ jobs:
         run: ./gradlew :app:atdApi30DebugAndroidTest
 
       # AGP skips the task silently when the androidTest source set is empty,
-      # so a green emulator job is not by itself evidence that anything ran.
+      # and reports a run of entirely @Ignore'd tests as a pass, so a green
+      # emulator job is not by itself evidence that anything executed.
       - name: Assert the instrumented run was not empty
         run: python3 .github/scripts/assert_instrumented_tests_ran.py
+
+      # Only after a green run, and only on a miss — see the restore step.
+      - name: Save the ATD system image
+        if: success() && steps.restore-system-image.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.ANDROID_SYSTEM_IMAGES }}
+          key: android-system-image-aosp_atd-30-${{ runner.os }}
 
       - name: Upload instrumented test reports
         if: always()

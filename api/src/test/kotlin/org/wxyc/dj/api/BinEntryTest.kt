@@ -155,4 +155,21 @@ class BinEntryTest {
         // reintroducing that mode fail on the host instead of only on device.
         assertEquals(Collator.CANONICAL_DECOMPOSITION, BinSorting.newCollator().decomposition)
     }
+
+    @Test
+    fun `newCollator pins primary strength, which no ordering fixture constrains`() {
+        // The sort cases above cannot see this. Their fixtures order the same
+        // way at PRIMARY, SECONDARY and TERTIARY — measured, not assumed — so
+        // a strength regression, which stops a name's accented and unaccented
+        // spellings filing together, passes every one of them. `:app`'s
+        // BinCollationParityTest cannot see it either, for a different and
+        // worse reason: it *derives* its ICU oracle's strength from
+        // newCollator(), so the mutation moves its expectation in lockstep.
+        //
+        // Hence a restated literal rather than a derived one, and hence here
+        // rather than only in :app's on-device suite: the device tier catches
+        // this too, but a host assertion that costs microseconds should not be
+        // deferred to a tier that costs an emulator boot.
+        assertEquals(Collator.PRIMARY, BinSorting.newCollator().strength)
+    }
 }

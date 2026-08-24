@@ -13,9 +13,20 @@ gets a guard rather than a convention. Sums the `tests` attribute across every
 JUnit XML the run produced and exits non-zero on a total of zero, or on no XML
 at all.
 
+Skips are subtracted rather than counted. An `@Ignore`d suite reports
+`tests="7" skipped="7"` and would otherwise print `OK: 7 instrumented test(s)`
+while executing none — the same expensive-green-light this guard exists to
+prevent, reached by a different door than the empty source set.
+
 Deliberately does NOT check failure counts: Gradle already fails the build on a
 failing test, and duplicating that here would make the two disagree the first
 time one of them changes.
+
+**Reads whatever XML is on disk, with no freshness check.** In CI that is
+exactly the run that just happened, because the workspace is a fresh checkout.
+Locally it is not: a stale `androidTest-results/` from an earlier run satisfies
+this guard, so a local green means something only on a clean tree or
+immediately after the Gradle task in the same invocation.
 
 Usage: python3 .github/scripts/assert_instrumented_tests_ran.py [results-dir]
 """
@@ -51,15 +62,18 @@ def main() -> int:
         # valid JUnit XML and costs nothing to accept.
         suites = [root] if root.tag == "testsuite" else root.iter("testsuite")
         for suite in suites:
-            count = int(suite.get("tests", "0"))
-            total += count
-            print(f"  {xml_file.name}: {count} test(s)")
+            declared = int(suite.get("tests", "0"))
+            skipped = int(suite.get("skipped", "0"))
+            executed = declared - skipped
+            total += executed
+            detail = f" ({skipped} skipped)" if skipped else ""
+            print(f"  {xml_file.name}: {executed} test(s) executed{detail}")
 
     if total == 0:
         print(
             f"FAIL: the instrumented run executed 0 tests across {len(xml_files)} result file(s).\n"
             "      An emulator booted and measured nothing. Check that the tests are in\n"
-            "      app/src/androidTest/ and not app/src/test/.",
+            "      app/src/androidTest/ and not app/src/test/, and that they are not all @Ignore'd.",
             file=sys.stderr,
         )
         return 1

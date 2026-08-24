@@ -42,7 +42,7 @@ There is a fourth, on a real Android runtime, because the host tier cannot answe
 python3 .github/scripts/assert_instrumented_tests_ran.py
 ```
 
-Gradle provisions the emulator itself, so that is the same command CI runs. The first run downloads a ~500 MB system image and needs its license accepted once (`sdkmanager --licenses`, from `cmdline-tools`); afterwards it is a couple of minutes. The second command is not optional ceremony: with an empty `androidTest` source set the Gradle task reports `BUILD SUCCESSFUL` in under a second having measured nothing, so the guard is what makes the green mean something.
+Gradle provisions the emulator itself, so that is the same command CI runs. The first run downloads a ~500 MB system image and needs its license accepted once (`sdkmanager --licenses`, from `cmdline-tools`); afterwards it is a couple of minutes. The second command is not optional ceremony: with an empty `androidTest` source set the Gradle task reports `BUILD SUCCESSFUL` in under a second having measured nothing, so the guard is what makes the green mean something. It reads whatever result XML is on disk and does not check its age, so locally that holds on a clean tree or immediately after the Gradle task — not over a stale `app/build` from an earlier run.
 
 Run the instrumented tier when you touch `:app`, anything platform-backed, or anything the host tier can only test through a shim. CI runs it on every PR regardless.
 

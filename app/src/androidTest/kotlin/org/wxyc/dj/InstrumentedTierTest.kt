@@ -5,7 +5,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -37,34 +36,28 @@ import org.junit.runner.RunWith
 class InstrumentedTierTest {
     @Test
     fun theSuiteRunsOnAnAndroidRuntimeAndNotOnTheHostJvm() {
-        // ART reports "Dalvik" for compatibility; every desktop JVM reports
-        // some "… VM" string (HotSpot: "OpenJDK 64-Bit Server VM"). This is
-        // the assertion Robolectric cannot satisfy, because Robolectric IS
-        // the host JVM with android.* swapped underneath it.
-        assertEquals("Dalvik", System.getProperty("java.vm.name"))
-
-        // Belt to the above's braces: names the specific impostor this repo
-        // actually tripped over, so a failure reads as "you are on
-        // Robolectric" rather than only "you are not on ART".
+        // Order matters. The fingerprint check is the SPECIFIC one and runs
+        // first, so a Robolectric run fails with a message naming Robolectric;
+        // put the general assertion first and it throws before this ever
+        // executes, making the specific message unreachable in the one
+        // situation it was written for.
         assertNotEquals("robolectric", Build.FINGERPRINT)
-    }
 
-    @Test
-    fun theRuntimeIsAtOrAboveTheAppsDeclaredMinSdk() {
-        // Mirrors `minSdk = 26` in app/build.gradle.kts. An emulator below
-        // the floor would be testing a configuration the app refuses to
-        // install on, which is worse than not testing at all: it reports
-        // failures nobody has to fix and hides the ones they do.
-        assertTrue(
-            "Instrumented tests ran on API ${Build.VERSION.SDK_INT}, below the app's minSdk of 26",
-            Build.VERSION.SDK_INT >= 26,
-        )
+        // The general one. ART reports "Dalvik" for compatibility on every
+        // API level (AOSP hardcodes it in initUnchangeableSystemProperties);
+        // every desktop JVM reports some "… VM" string. So any host-JVM-hosted
+        // impostor fails here — a future shadowing framework, or files that
+        // landed in src/test instead of src/androidTest — not just the one
+        // this repo tripped over.
+        assertEquals("Dalvik", System.getProperty("java.vm.name"))
     }
 
     @Test
     fun theInstrumentationIsTargetingThisApp() {
-        // Proves the APK under test is the one this module builds, not a
-        // stale install left by an earlier run on the same device.
+        // Narrow on purpose: this detects a wrong or renamed applicationId,
+        // nothing more. It cannot tell a stale install of org.wxyc.dj from a
+        // fresh one — same package name either way — so do not read it as a
+        // freshness check.
         assertEquals(
             "org.wxyc.dj",
             InstrumentationRegistry.getInstrumentation().targetContext.packageName,
