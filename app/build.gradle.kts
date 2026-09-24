@@ -84,6 +84,16 @@ android {
         baseline = file("lint-baseline.xml")
         // Findings must reach the CI console; the HTML report exists only in
         // the uploaded artifact.
+        //
+        // AGP 9 deprecates this property, claiming lint reports are "now always
+        // generated" and pointing at SingleArtifact.LINT_TEXT_REPORT instead.
+        // Taken at face value the line looks safely deletable. It is not:
+        // deleting it and re-running `:app:lintDebug --rerun-tasks` prints no
+        // findings at all. "Always generated" means written to a file, not
+        // written to stdout, and the CI job's whole lint signal is stdout. So
+        // this stays, deprecation warning and all, until the AGP 10 work wires
+        // the artifact up deliberately — a silent lint gate is a worse trade
+        // than a noisy one.
         textReport = true
         warningsAsErrors = false
         disable += setOf("MissingTranslation")
@@ -128,14 +138,39 @@ android {
         // become the divergence that matters, and adding one is a five-line
         // `create(...)` block plus a matching CI task name.
         //
-        // `testedAbi` is deliberately left unset, with a dated caveat: AGP
-        // warns that it presently defaults to "x86" and that AGP 9.0 will
-        // change that default to "arm64-v8a". Today's default is what the
-        // ubuntu runner needs (it resolves the API 30 ATD x86 image and runs),
-        // and pinning "x86" here would break this device on an Apple-silicon
-        // laptop, which is half the point of choosing an image published for
-        // both. Revisit on the AGP 9 upgrade — API 31+ ATD publishes no 32-bit
-        // x86 at all, so moving the floor up is the likely resolution.
+        // `testedAbi` STAYS UNSET, and the dated caveat this comment used to
+        // carry is still unresolved — but for a different reason than it
+        // guessed, and the difference is worth writing down because the
+        // obvious fix looks like it works and does not.
+        //
+        // AGP 8.x defaulted this to "x86" and warned that AGP 9.0 would change
+        // the default to "arm64-v8a". Setting it from the host architecture is
+        // the obvious answer, and it compiles — but under
+        // `android.newDsl=false` (see gradle.properties) AGP 9.4.1 **silently
+        // ignores the property**. Measured twice, not inferred: CI logs "The
+        // device atdApi30 does not specify a testedAbi" on a run whose
+        // build file set it, and locally a deliberately incompatible
+        // `testedAbi = "x86"` on an arm64 host runs `:app:atdApi30Setup
+        // --rerun-tasks` to BUILD SUCCESSFUL, when AGP's own
+        // ManagedDeviceInstrumentationTestSetupTask is supposed to hard-error
+        // on exactly that mismatch. A value here would therefore be decoration
+        // that reads as a guarantee.
+        //
+        // What actually happens today: AGP picks the image from the host, so
+        // CI gets x86 and an Apple-silicon laptop gets arm64-v8a, which is the
+        // behavior this block wants. **That stops being true in AGP 10**,
+        // where the unspecified default becomes "arm64-v8a" for everyone — AGP
+        // says so in the warning it prints on every CI run — and the x86
+        // runner would then be asked to run an ARM-built test APK against an
+        // x86 image, which `aosp-atd` cannot translate. So this is a real
+        // future break with a deadline, not a style question, and it is
+        // blocked on the same thing the compat flags are: see #36.
+        //
+        // The old caveat also predicted the API floor would have to move up,
+        // believing API 30 ATD published only 32-bit x86. It does not —
+        // `sdkmanager --list` shows android-30 aosp_atd publishing arm64-v8a,
+        // x86 AND x86_64 — so whenever the property starts working, the floor
+        // can stay at 30.
         managedDevices {
             localDevices {
                 create("atdApi30") {
@@ -146,20 +181,6 @@ android {
             }
         }
     }
-}
-
-// Works around a real Hilt Gradle plugin bug (google/dagger#4976, #4048): its
-// opt-in cross-module "aggregating task" (:app:hiltAggregateDepsDebug) fails
-// with `NoSuchMethodError: ClassName.canonicalName()` -- a JavaPoet version
-// mismatch on that task's own worker classpath, reproduced against Hilt 2.58
-// (the newest release whose Gradle plugin still supports AGP 8.x -- 2.59+
-// requires AGP 9) on this repo's AGP 8.13.2 + Gradle 9.0 combination. The
-// aggregating task exists to discover @Module/@EntryPoint types published
-// from a *separate* library module's AAR; this repo has exactly one Hilt
-// consumer (:app itself -- :api is a pure JVM module that can't use Hilt at
-// all, per this repo's CLAUDE.md), so disabling it costs nothing here.
-hilt {
-    enableAggregatingTask = false
 }
 
 // Pin the JDK Gradle compiles and runs tests on, not just the bytecode level:

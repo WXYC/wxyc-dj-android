@@ -5,7 +5,7 @@
 # some later PR trips over it. Add the alias and the usage in the same change.
 
 [versions]
-agp = "8.13.2"
+agp = "9.4.1"
 kotlin = "2.2.20"
 androidxCore = "1.15.0"
 androidxLifecycle = "2.8.7"
@@ -21,7 +21,7 @@ androidxTestRunner = "1.6.2"
 androidxTestExtJunit = "1.2.1"
 # Issue #7 (:app shell): Hilt graph, encrypted token storage, nav skeleton.
 ksp = "2.2.20-2.0.4"
-hilt = "2.58"
+hilt = "2.60.1"
 hiltNavigationCompose = "1.3.0"
 navigationCompose = "2.9.6"
 datastorePreferences = "1.2.1"
