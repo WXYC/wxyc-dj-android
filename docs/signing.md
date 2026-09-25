@@ -18,8 +18,10 @@ keytool -list -v -keystore <path-to-keystore> -alias <alias> | grep 'SHA256:'
 
 | Key | Alias | SHA-256 fingerprint | Held by |
 |---|---|---|---|
-| Upload key | _(record on creation)_ | _(record on creation)_ | WXYC MD/SM, offline |
+| Upload key | `wxyc-dj-upload` | `50:4A:A3:DB:15:9B:03:AA:CD:31:67:46:FD:AE:B1:03:B8:46:B8:DF:FC:D6:A8:1E:F0:EB:DB:E4:5E:9D:A9:FE` | WXYC MD/SM, offline |
 | App signing key | — | _(copy from Play Console → App integrity)_ | Google (Play App Signing) |
+
+The upload key was created 2026-09-24, RSA 4096, `CN=WXYC, OU=WXYC 89.3 FM, O=WXYC, L=Chapel Hill, ST=NC, C=US`. Despite the `.jks` extension it is a **PKCS12** keystore — that is what modern `keytool` produces, and it is why there is one password rather than two: PKCS12 does not support a key password that differs from the store password, so no separate key password exists to record or to go stale. The app signing key row stays empty until the first upload enrolls the app in Play App Signing; fill it from Play Console then.
 
 Fill both rows in the same change that creates the key. An unrecorded fingerprint is how the misleading-filename problem starts.
 
