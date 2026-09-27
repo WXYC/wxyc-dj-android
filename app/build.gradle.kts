@@ -39,8 +39,16 @@ android {
         // dj.wxyc.org, so the exclusion costs a login rather than their show.
         minSdk = 26
         targetSdk = 36
+        // versionCode is permanent once a bundle carrying it reaches Play: the
+        // number can never be reused, not even after the release is deleted, so
+        // the first upload spends 1 for good. Deliberately left at 1 rather than
+        // started high — nothing here needs reserved headroom, and a truthful
+        // first build number is worth more than room to renumber.
         versionCode = 1
-        versionName = "0.1"
+        // Two-part, matching the listener app (WXYC-Android is on "1.4") rather
+        // than the iOS port's three-part MARKETING_VERSION (0.1.0). This is the
+        // shipping version, not a pre-release one — "0.1" was scaffold-era.
+        versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
