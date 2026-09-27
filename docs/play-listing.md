@@ -30,8 +30,15 @@ Each is a fact about the code, not a judgement, and each is checkable in one gre
 
 **Target age: 18 and over.** The app is an internal tool for station staff, who are UNC students. Declaring any under-13 bracket opts the listing into the Families policy programme — a materially larger compliance surface for an audience this app does not have.
 
-**Content rating: Everyone / PEGI 3.** The IARC questionnaire answers are all negative: no violence, sexual content, profanity, controlled substances, gambling or simulated gambling. Two that are easy to answer wrongly:
+**Content rating: Everyone / PEGI 3 expected.** The app authors no content of its own — it displays a station music catalogue and a per-DJ list drawn from it — so violence, sexual content, controlled substances, gambling and simulated gambling are all straightforwardly absent.
 
+**Profanity is the one answer not to give reflexively.** An earlier revision of this file claimed the questionnaire answers were "all negative", which was firmer than the evidence supports. `SearchResultRow.kt` renders `albumTitle` and `artistName` verbatim from the WXYC library, this is freeform college radio, and that catalogue certainly contains records whose titles carry profanity. There is also **no explicit-content field anywhere in the wire model** — checked, not assumed — so the app can neither filter nor label such a title; it shows what the catalogue holds.
+
+That is probably not a rating problem, since the strings are third-party metadata a DJ searched for rather than content the app wrote, and catalogue and reference apps are not generally rated up for it. But it is a judgement about how IARC treats searched third-party metadata, and it should be made deliberately rather than inherited from a sentence in this file. The honest framing at the question: *the app surfaces third-party music metadata in response to a search; it authors none of it.*
+
+Three more that are easy to answer wrongly:
+
+- **"News or Educational" is No.** The wording tempts a yes — the app does present factual information neutrally. But the test is *primary purpose*, and this one's is operational: a staff tool for preparing a show, not a reference product for a reader. The category's own examples are Wikipedia, dictionaries and WebMD, all of which exist to inform their user; this exists to get a DJ to air. It also squares with the Play category being Music & Audio rather than News or Education. Worth knowing why IARC asks at all: the flag contextualises otherwise-objectionable content, so that a medical reference discussing drugs clinically is not rated as drug content. Answering yes is a request for interpretive leniency this app does not need, and claiming it would be a misrepresentation.
 - **Users do not interact.** There is no messaging, commenting, or any DJ-to-DJ surface. A DJ sees the shared station library and their own bin, and nothing another DJ authored.
 - **No user-generated content is shared.** A bin is private to the account that owns it.
 
