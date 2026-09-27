@@ -27,3 +27,7 @@ keystore.properties
 # the DJ's own session. The line is here so an accidental one is caught rather
 # than committed.
 secrets.properties
+
+# Python bytecode from tools/
+__pycache__/
+*.pyc
