@@ -5,9 +5,21 @@
   linking with `resource mipmap/ic_launcher not found` even at minSdk 26. Lint
   advises merging the folder anyway; that finding is suppressed in app/lint.xml,
   where the reasoning is recorded.
+
+  The background is a bitmap rather than a solid colour because the mark it
+  came from is: the iOS icon composes the WXYC wordmark over the "Gilmore
+  Rings" artwork on a dark navy fill (wxyc-dj-ios WXYCDJ/AppIcon.icon). The
+  rings are concentric and centred, which is what makes them safe here — every
+  launcher mask shape is radially symmetric about the same centre, so a circle,
+  a squircle and a rounded square all crop them identically and none of them
+  crop them wrongly.
+
+  The monochrome layer is deliberately the foreground alone. Themed icons are
+  tinted flat, so handing them the rings would collapse seven bands into one
+  solid blob; the wordmark on its own still reads.
 -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@color/ic_launcher_background" />
+    <background android:drawable="@mipmap/ic_launcher_background" />
     <foreground android:drawable="@drawable/ic_launcher_foreground" />
     <monochrome android:drawable="@drawable/ic_launcher_foreground" />
 </adaptive-icon>
